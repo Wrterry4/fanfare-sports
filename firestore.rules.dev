@@ -1,0 +1,369 @@
+rules_version = '2';
+
+// ###########################################################################
+// #                                                                         #
+// #   DEVELOPMENT RULES — NOT FOR PRODUCTION                                 #
+// #                                                                         #
+// #   Deploy with:  firebase deploy --only firestore:rules                   #
+// #   after pointing firebase.json at this file.                             #
+// #                                                                         #
+// #   Difference from firestore.rules: team, member, player, and roster      #
+// #   documents can be created directly by any signed-in user, because       #
+// #   Cloud Functions require the Blaze plan and this project is on Spark.   #
+// #                                                                         #
+// #   What that means concretely: anyone with an account can create teams    #
+// #   and player records. Read privacy is UNCHANGED — a parent still cannot  #
+// #   see another family's child, and the event log is still single-writer.  #
+// #                                                                         #
+// #   SWITCH BACK BEFORE ANY REAL PARENT JOINS:                              #
+// #     1. Upgrade to Blaze                                                  #
+// #     2. firebase deploy --only functions                                  #
+// #     3. Set EXPO_PUBLIC_SPARK_MODE=false in .env                          #
+// #     4. Point firebase.json back at firestore.rules and redeploy          #
+// #                                                                         #
+// ###########################################################################
+
+// ===========================================================================
+// Youth baseball app — Firestore security rules
+//
+// Two ideas do most of the work here:
+//
+//   1. Roles are per-team, never global. A coach on one team is a parent on
+//      another, so `isCoach` on the user document would be wrong the moment
+//      anyone belongs to two teams.
+//
+//   2. Granular stats live in their own documents. Firestore rules are
+//      all-or-nothing per document — there is no field-level read filtering —
+//      so "parents see only their own kid" is only enforceable if each
+//      player's stats are a separate doc.
+// ===========================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- identity -------------------------------------------------------
+    function signedIn()  { return request.auth != null; }
+    function uid()       { return request.auth.uid; }
+
+    // ---- team membership ------------------------------------------------
+    function memberPath(teamId) {
+      return /databases/$(database)/documents/teams/$(teamId)/members/$(uid());
+    }
+    function isMember(teamId) {
+      return signedIn() && exists(memberPath(teamId));
+    }
+    function memberRole(teamId) {
+      return get(memberPath(teamId)).data.role;
+    }
+    function isStaff(teamId) {
+      return isMember(teamId) && memberRole(teamId) in ['owner', 'coach'];
+    }
+    function isTeamOwner(teamId) {
+      return isMember(teamId) && memberRole(teamId) == 'owner';
+    }
+    function canScore(teamId) {
+      return isMember(teamId) && memberRole(teamId) in ['owner', 'coach', 'scorekeeper'];
+    }
+    // A fan (grandparent, aunt, family friend) follows one child. They read the
+    // game and that child's stats, and stay out of team communication.
+    function isFan(teamId) {
+      return isMember(teamId) && memberRole(teamId) == 'fan';
+    }
+    function canChat(teamId) {
+      return isMember(teamId) && !isFan(teamId);
+    }
+
+    function gameDoc(teamId, gameId) {
+      return get(/databases/$(database)/documents/teams/$(teamId)/games/$(gameId)).data;
+    }
+
+    // ---- organizations ---------------------------------------------------
+    function isOrgAdmin(orgId) {
+      return signedIn() &&
+        uid() in get(/databases/$(database)/documents/organizations/$(orgId)).data.adminUserIds;
+    }
+
+    match /organizations/{orgId} {
+      allow read:   if isOrgAdmin(orgId);
+      allow update: if isOrgAdmin(orgId)
+                    // Billing is written by Cloud Functions only.
+                    && !request.resource.data.diff(resource.data).affectedKeys()
+                         .hasAny(['billing']);
+      allow create: if signedIn() && uid() in request.resource.data.adminUserIds;
+      allow delete: if false;
+    }
+
+    // ---- users -----------------------------------------------------------
+    match /users/{userId} {
+      allow read:   if signedIn() && uid() == userId;
+      allow create: if signedIn() && uid() == userId;
+      allow update: if signedIn() && uid() == userId
+                    // guardianOf is granted through the transfer flow, never
+                    // self-assigned — otherwise anyone could claim any child.
+                    && !request.resource.data.diff(resource.data).affectedKeys()
+                         .hasAny(['guardianOf']);
+      allow delete: if false;
+    }
+
+    // ---- players (root) --------------------------------------------------
+    // `authorizedUserIds` is denormalized by Cloud Function: guardians, plus
+    // the staff of every team the player is currently rostered on. One array
+    // read instead of an unbounded search across teams.
+    function playerData(playerId) {
+      return get(/databases/$(database)/documents/players/$(playerId)).data;
+    }
+    function canSeePlayer(playerId) {
+      return signedIn() && uid() in playerData(playerId).authorizedUserIds;
+    }
+    function isGuardian(playerId) {
+      return signedIn() && uid() in playerData(playerId).guardianUserIds;
+    }
+
+    match /players/{playerId} {
+      allow read:   if canSeePlayer(playerId);
+      // Function-only. `if signedIn()` let ANY authenticated user create a
+      // player document with themselves already listed as guardian — an
+      // account with a child attached, minted from the client. createPlayer()
+      // mints the career code and seeds access; nothing else may.
+      // DEV: no createPlayer() function. Creator must appear in
+      // authorizedUserIds so they can read back what they just wrote.
+      allow create: if signedIn()
+                    && uid() in request.resource.data.authorizedUserIds;
+      allow update: if isGuardian(playerId)
+                    // All three are function-managed. Editing them here would
+                    // let a user grant access to a child. rosteredTeamIds
+                    // matters because syncPlayerAccess() derives
+                    // authorizedUserIds from it — adding a team id is an
+                    // indirect way to hand that team's staff a child's record.
+                    && !request.resource.data.diff(resource.data).affectedKeys()
+                         .hasAny(['authorizedUserIds', 'guardianUserIds',
+                                  'rosteredTeamIds']);
+      allow delete: if false;
+
+      // Season and career stats. Separate documents specifically so this
+      // rule can exist.
+      match /seasons/{seasonKey} {
+        allow read:  if canSeePlayer(playerId);
+        allow write: if false;                 // Cloud Function on finalize
+      }
+      match /career/{docId} {
+        allow read:  if canSeePlayer(playerId);
+        allow write: if false;
+      }
+
+      // Pitching appearances are readable by anyone already authorized on the
+      // player. This is what surfaces "threw 61 pitches Thursday" to a coach
+      // whose team isn't the one that pitched him.
+      match /pitchingAppearances/{appearanceId} {
+        allow read:  if canSeePlayer(playerId);
+        allow write: if false;
+      }
+    }
+
+    // ---- career codes ----------------------------------------------------
+    // A permanent identifier for a minor must never be a client-readable
+    // lookup. Resolution happens inside claimPlayer() with admin credentials.
+    match /careerCodes/{codeHash} {
+      allow read, write: if false;
+    }
+
+    // ---- invites -----------------------------------------------------------
+    // Closed to clients. The token hash must never be readable, and redemption
+    // writes across members, players, and users atomically — which only a
+    // function can do. Coaches see invite status through invitePipeline().
+    match /invites/{inviteId} {
+      allow read, write: if false;
+    }
+
+    // ---- transfers -------------------------------------------------------
+    // Every roster link is consented by a guardian. A school cannot pull a
+    // child's record into its own roster on its own authority.
+    match /transfers/{transferId} {
+      allow read:   if signedIn() && (
+                      isGuardian(resource.data.playerId) ||
+                      isStaff(resource.data.toTeamId)
+                    );
+      allow create: if isStaff(request.resource.data.toTeamId)
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.requestedBy == uid();
+      // Approval runs through a Cloud Function so the linked writes
+      // (roster doc, guardianOf, authorizedUserIds) stay atomic.
+      allow update, delete: if false;
+    }
+
+    // ---- teams -----------------------------------------------------------
+    match /teams/{teamId} {
+      // DEV: any signed-in user may READ a team document. Needed so the join
+      // screen can show "Ridgeview Reds — Spring 2027" before joining, and so
+      // the member-create rule above can compare join codes. Team documents
+      // hold no personal data; players, stats, and messages stay protected.
+      allow read:   if signedIn();
+      // DEV: no createTeam() function available on Spark.
+      allow create: if signedIn() && request.resource.data.createdBy == uid();
+      allow update: if isStaff(teamId);
+      allow delete: if isTeamOwner(teamId);
+
+      // ---- members -------------------------------------------------------
+      match /members/{memberUid} {
+        allow read:   if isMember(teamId);
+        // isStaff() requires an EXISTING member doc, so the first member of a
+        // team can never be created from a client — the owner would need to
+        // already be a member to make themselves one. createTeam() writes the
+        // team and its owner membership in one transaction and is the only
+        // way a team comes into existence. Redemption uses redeemInvite().
+        // DEV: bootstrap — a user may create their OWN membership either
+        // because they created the team, or because they presented the team's
+        // join code. The code is checked against the team document, so it
+        // can't be guessed by writing an arbitrary value.
+        //
+        // On Blaze this is redeemInvite(), which also links a specific child
+        // and grants guardianship. The join code only grants membership.
+        allow create: if isStaff(teamId)
+                      || (uid() == memberUid &&
+                          get(/databases/$(database)/documents/teams/$(teamId))
+                            .data.createdBy == uid())
+                      || (uid() == memberUid
+                          && request.resource.data.role in ['parent','fan','scorekeeper','coach']
+                          && request.resource.data.joinCode ==
+                             get(/databases/$(database)/documents/teams/$(teamId)).data.joinCode);
+        allow update: if isStaff(teamId)
+                      && request.resource.data.role in
+                           ['owner','coach','scorekeeper','parent','fan']
+                      // Only an owner may mint another owner.
+                      && (request.resource.data.role != 'owner' || isTeamOwner(teamId))
+                      || (
+                        // Anyone may edit their own notification preferences,
+                        // and nothing else.
+                        uid() == memberUid &&
+                        request.resource.data.diff(resource.data).affectedKeys()
+                          .hasOnly(['notificationPrefs'])
+                      );
+        allow delete: if isStaff(teamId) || uid() == memberUid;
+      }
+
+      // ---- roster --------------------------------------------------------
+      match /roster/{playerId} {
+        allow read:   if isMember(teamId);
+        allow create: if isStaff(teamId);
+        allow update: if isStaff(teamId)
+                      || (isGuardian(playerId) &&
+                          request.resource.data.diff(resource.data).affectedKeys()
+                            .hasOnly(['audioConfig']));
+        allow delete: if isStaff(teamId);
+      }
+
+      // ---- games ---------------------------------------------------------
+      match /games/{gameId} {
+        allow read:   if isMember(teamId);
+        allow create: if isStaff(teamId);
+        allow delete: if isStaff(teamId);
+
+        allow update: if
+          // The scorekeeper drives live game state.
+          (canScore(teamId) && resource.data.scorekeeperUid == uid())
+          // Any eligible scorer may raise a hand for the book. Requesting is
+          // not taking — only the flag changes.
+          || (canScore(teamId) &&
+              request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['batonRequestedBy']) &&
+              request.resource.data.batonRequestedBy == uid())
+          // Handoff requires the current holder's approval.
+          || (resource.data.scorekeeperUid == uid() &&
+              request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['scorekeeperUid', 'batonRequestedBy']))
+          // Escape hatch: an owner can reclaim the book when the scorer's
+          // phone dies mid-game. Without this the game is unscoreable.
+          || (isTeamOwner(teamId) &&
+              request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['scorekeeperUid', 'batonRequestedBy', 'batonSeizedAt']));
+
+        // ---- event log ---------------------------------------------------
+        // Append-only, single writer. Immutable once written: corrections
+        // set `voided` through a Cloud Function, which preserves the audit
+        // trail and keeps replay deterministic.
+        match /events/{eventId} {
+          allow read:   if isMember(teamId);
+          allow create: if canScore(teamId)
+                        && gameDoc(teamId, gameId).scorekeeperUid == uid()
+                        && request.resource.data.createdBy == uid()
+                        && request.resource.data.voided == false;
+          allow update, delete: if false;
+        }
+      }
+
+      // ---- channels ------------------------------------------------------
+      match /channels/{channelId} {
+        allow read:  if canChat(teamId);
+        allow write: if isStaff(teamId);
+
+        match /messages/{messageId} {
+          allow read:   if canChat(teamId);
+          allow create: if canChat(teamId)
+                        && request.resource.data.senderId == uid()
+                        && (channelId != 'announcements' || isStaff(teamId));
+          allow update: if resource.data.senderId == uid()
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                             .hasOnly(['text', 'editedAt']);
+          allow delete: if resource.data.senderId == uid() || isStaff(teamId);
+        }
+      }
+
+      // ---- media ---------------------------------------------------------
+      // Deferred past v1. Rule is here so the collection is closed rather
+      // than accidentally world-readable if someone writes to it early.
+      match /media/{mediaId} {
+        allow read:   if isMember(teamId);
+        allow create: if isMember(teamId)
+                      && request.resource.data.uploaderId == uid();
+        allow update, delete: if resource.data.uploaderId == uid() || isStaff(teamId);
+      }
+    }
+
+    // ---- direct messages ---------------------------------------------------
+    // conversationId encodes the team: {teamId}_{uidA}_{uidB}, sorted.
+    // Both participants must be current members of that team, which — since
+    // v1 has no minor accounts — makes every DM adult-to-adult within one
+    // roster by construction rather than by UI convention.
+    match /conversations/{conversationId} {
+      function participants() { return resource.data.participantUids; }
+      function bothOnTeam(teamId, users) {
+        return exists(/databases/$(database)/documents/teams/$(teamId)/members/$(users[0]))
+            && exists(/databases/$(database)/documents/teams/$(teamId)/members/$(users[1]));
+      }
+
+      allow read:   if signedIn() && uid() in participants()
+                    && canChat(resource.data.teamId);
+      allow create: if signedIn()
+                    && uid() in request.resource.data.participantUids
+                    && request.resource.data.participantUids.size() == 2
+                    && canChat(request.resource.data.teamId)
+                    && bothOnTeam(request.resource.data.teamId,
+                                  request.resource.data.participantUids);
+      allow update: if signedIn() && uid() in participants()
+                    && canChat(resource.data.teamId);
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        function convo() {
+          return get(/databases/$(database)/documents/conversations/$(conversationId)).data;
+        }
+        allow read:   if signedIn() && uid() in convo().participantUids;
+        allow create: if signedIn()
+                      && uid() in convo().participantUids
+                      && canChat(convo().teamId)
+                      && request.resource.data.senderId == uid();
+        allow update: if resource.data.senderId == uid()
+                      && request.resource.data.diff(resource.data).affectedKeys()
+                           .hasOnly(['text', 'editedAt']);
+        allow delete: if resource.data.senderId == uid();
+      }
+    }
+
+    // Anything not matched above is denied. Stated explicitly because the
+    // original blueprint's rules defined a permission helper and then never
+    // called it, leaving every document open to any signed-in user.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

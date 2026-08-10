@@ -1,0 +1,56 @@
+rules_version = '2';
+
+// Walk-up audio and team media. Audio ships behind a feature flag, but the
+// rules exist now so the bucket is closed rather than accidentally open if
+// something writes to it early.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function signedIn() { return request.auth != null; }
+
+    function isStaff(teamId) {
+      return signedIn() && firestore.get(
+        /databases/(default)/documents/teams/$(teamId)/members/$(request.auth.uid)
+      ).data.role in ['owner', 'coach'];
+    }
+
+    function isGuardian(playerId) {
+      return signedIn() && request.auth.uid in firestore.get(
+        /databases/(default)/documents/players/$(playerId)
+      ).data.guardianUserIds;
+    }
+
+    function isTeamMember(teamId) {
+      return signedIn() && firestore.exists(
+        /databases/(default)/documents/teams/$(teamId)/members/$(request.auth.uid)
+      );
+    }
+
+    // ---- walk-up audio ---------------------------------------------------
+    // A parent picks the song for their own kid; coaches can fix anyone's.
+    // Capped at 8MB: a trimmed clip is well under a megabyte, and a cap this
+    // low makes it obvious when someone is uploading a whole album.
+    match /teams/{teamId}/players/{playerId}/audio/{fileName} {
+      allow read: if isTeamMember(teamId);
+      allow write: if (isGuardian(playerId) || isStaff(teamId))
+                   && request.resource.size < 8 * 1024 * 1024
+                   && request.resource.contentType.matches('audio/.*');
+      allow delete: if isGuardian(playerId) || isStaff(teamId);
+    }
+
+    // ---- team media (deferred past v1) ------------------------------------
+    match /teams/{teamId}/media/{fileName} {
+      allow read: if isTeamMember(teamId);
+      allow write: if isTeamMember(teamId)
+                   && request.resource.size < 25 * 1024 * 1024
+                   && (request.resource.contentType.matches('image/.*')
+                       || request.resource.contentType.matches('video/.*'));
+      allow delete: if isStaff(teamId);
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

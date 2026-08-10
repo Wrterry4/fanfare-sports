@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Layout prototype — youth baseball app</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800;900&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  /* Drawn from the field: chalk, clay, dugout shadow, outfield. */
+  --chalk:#F6F4EF;
+  --card:#FFFFFF;
+  --line:#DBD6CC;
+  --navy:#14213A;
+  --pencil:#5C6274;
+  --clay:#B5451B;
+  --clay-dim:#E8D3C9;
+  --grass:#2E6B3F;
+  --out:#9E1B1B;
+  --gold:#C79A25;
+
+  --r:10px;
+  --shadow:0 1px 0 rgba(20,33,58,.06), 0 2px 8px rgba(20,33,58,.05);
+  --tap:56px;
+}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:#2B3040;
+  font-family:'Public Sans',-apple-system,BlinkMacSystemFont,sans-serif;
+  color:var(--navy);
+  display:flex;justify-content:center;
+  padding:20px;min-height:100vh;
+}
+@media (max-width:520px){body{padding:0}}
+
+/* ---- phone frame (prototype only; not part of the app) ---- */
+.phone{
+  width:390px;max-width:100%;
+  background:var(--chalk);
+  border-radius:26px;overflow:hidden;
+  display:flex;flex-direction:column;
+  height:844px;max-height:100vh;
+  box-shadow:0 20px 60px rgba(0,0,0,.4);
+  position:relative;
+}
+@media (max-width:520px){.phone{border-radius:0;height:100vh}}
+
+/* ---- view switch (prototype only) ---- */
+.switch{
+  display:flex;gap:2px;padding:8px 10px;
+  background:var(--navy);flex:0 0 auto;
+}
+.switch button{
+  flex:1;border:0;background:transparent;color:#8A93AB;
+  font-family:'Archivo',sans-serif;font-weight:700;font-size:11px;
+  letter-spacing:.09em;text-transform:uppercase;
+  padding:9px 4px;border-radius:6px;cursor:pointer;
+}
+.switch button[aria-pressed="true"]{background:rgba(255,255,255,.11);color:#fff}
+
+.stage{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch}
+.view{display:none;flex-direction:column;min-height:100%}
+.view.on{display:flex}
+
+/* ---- scoreboard strip ---- */
+.board{
+  background:var(--navy);color:#fff;
+  padding:11px 16px 13px;
+  position:sticky;top:0;z-index:20;
+  box-shadow:0 2px 10px rgba(20,33,58,.18);
+  display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;
+}
+.board .teams{display:grid;gap:3px}
+.trow{display:grid;grid-template-columns:1fr auto;gap:14px;align-items:baseline}
+.tname{
+  font-family:'Archivo',sans-serif;font-weight:700;font-size:13px;
+  letter-spacing:.07em;text-transform:uppercase;color:#A8B0C6;
+}
+.trow.bat .tname{color:#fff}
+.trow.bat .tname::before{
+  content:"";display:inline-block;width:0;height:0;
+  border-left:5px solid var(--clay);
+  border-top:4px solid transparent;border-bottom:4px solid transparent;
+  margin-right:7px;vertical-align:middle;
+}
+.tscore{
+  font-family:'Archivo',sans-serif;font-weight:900;font-size:27px;
+  line-height:1;font-variant-numeric:tabular-nums;
+}
+.situation{text-align:right;display:grid;gap:5px;justify-items:end}
+.inning{
+  font-family:'Archivo',sans-serif;font-weight:800;font-size:14px;
+  letter-spacing:.06em;text-transform:uppercase;
+}
+.pips{display:flex;gap:9px;align-items:center}
+.pipset{display:flex;gap:3px;align-items:center}
+.pipset .lbl{
+  font-size:9px;font-weight:700;letter-spacing:.1em;
+  color:#7E88A3;margin-right:2px;
+}
+.pipdots{display:inline-flex;gap:3px;align-items:center}
+.pip{display:block;width:8px;height:8px;border-radius:50%;border:1.5px solid #5A6486}
+.pip.on{background:#fff;border-color:#fff}
+.pip.out.on{background:var(--out);border-color:var(--out)}
+
+/* ---- the diamond: the scorebook glyph, scaled up ---- */
+.field{
+  padding:16px 16px 10px;
+  display:flex;justify-content:center;
+  background:
+    linear-gradient(var(--chalk),var(--chalk)) padding-box;
+}
+.diamond{width:100%;max-width:250px;height:auto}
+.dline{fill:none;stroke:var(--navy);stroke-width:2.5;stroke-linejoin:round}
+.dfill{fill:var(--clay-dim);opacity:0}
+.base{fill:var(--card);stroke:var(--navy);stroke-width:2.5}
+.base.occ{fill:var(--clay);stroke:var(--clay)}
+.basenum{
+  font-family:'Archivo',sans-serif;font-weight:900;font-size:14px;
+  fill:#fff;text-anchor:middle;dominant-baseline:central;
+  pointer-events:none;
+}
+.baselbl{
+  font-family:'Public Sans',sans-serif;font-weight:700;font-size:9px;
+  fill:var(--pencil);text-anchor:middle;letter-spacing:.08em;
+}
+.tapbase{fill:transparent;cursor:pointer}
+
+/* ---- batter bar ---- */
+.batter{
+  margin:2px 14px 12px;background:var(--card);
+  border:1px solid var(--line);border-radius:var(--r);
+  padding:11px 13px;display:grid;
+  grid-template-columns:auto 1fr auto;gap:11px;align-items:center;
+  box-shadow:var(--shadow);
+}
+.jersey{
+  width:38px;height:38px;border-radius:8px;background:var(--navy);
+  color:#fff;display:grid;place-items:center;
+  font-family:'Archivo',sans-serif;font-weight:900;font-size:16px;
+  font-variant-numeric:tabular-nums;
+}
+.bname{
+  font-family:'Archivo',sans-serif;font-weight:700;font-size:15px;
+  letter-spacing:.01em;line-height:1.15;
+}
+.bmeta{font-size:11.5px;color:var(--pencil);margin-top:2px;font-weight:500}
+.bline{
+  font-family:'Archivo',sans-serif;font-weight:800;font-size:13px;
+  color:var(--clay);font-variant-numeric:tabular-nums;text-align:right;
+}
+.bline span{display:block;font-size:9px;color:var(--pencil);font-weight:600;letter-spacing:.09em}
+
+/* ---- action pads ---- */
+.pads{margin-top:auto;padding:0 12px 12px;display:grid;gap:7px}
+.padlbl{
+  font-size:9px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--pencil);padding-left:3px;margin-bottom:-2px;
+}
+.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+.row5{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+
+button.k{
+  border:1px solid var(--line);background:var(--card);
+  border-radius:var(--r);cursor:pointer;
+  font-family:'Archivo',sans-serif;font-weight:800;
+  color:var(--navy);box-shadow:var(--shadow);
+  display:grid;place-items:center;gap:1px;
+  transition:transform .06s ease, background .12s ease;
+  touch-action:manipulation;
+}
+button.k:active{transform:scale(.965);background:#F0EDE6}
+button.k:focus-visible{outline:2.5px solid var(--clay);outline-offset:2px}
+button.k.pitch{height:var(--tap);font-size:15px;letter-spacing:.05em}
+button.k.pitch.strike{background:var(--navy);color:#fff;border-color:var(--navy)}
+button.k.pitch.strike:active{background:#20305a}
+button.k.out{height:46px;font-size:13px}
+button.k.hit{height:46px;font-size:14px;border-color:#CFC2AC;background:#FFFDF8}
+button.k .sub{
+  font-family:'Public Sans',sans-serif;font-weight:600;
+  font-size:8.5px;letter-spacing:.06em;color:var(--pencil);text-transform:uppercase;
+}
+button.k.pitch.strike .sub{color:#93A0C0}
+
+.utility{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:1px}
+button.u{
+  height:42px;border-radius:var(--r);cursor:pointer;
+  font-family:'Archivo',sans-serif;font-weight:800;font-size:12px;
+  letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid var(--line);background:transparent;color:var(--pencil);
+  touch-action:manipulation;
+}
+button.u.undo{border-color:#D3C4C4;color:var(--out)}
+button.u:active{background:rgba(0,0,0,.04)}
+button.u:focus-visible{outline:2.5px solid var(--clay);outline-offset:2px}
+
+/* ---- baton ---- */
+.baton{
+  margin:0 12px 8px;border-radius:var(--r);
+  background:#FFF7E6;border:1px solid #E8D9AE;
+  padding:9px 11px;display:grid;grid-template-columns:1fr auto;
+  gap:9px;align-items:center;
+}
+.baton .t{font-size:11.5px;font-weight:600;line-height:1.35}
+.baton .t b{font-weight:700}
+.baton button{
+  border:0;background:var(--navy);color:#fff;border-radius:7px;
+  padding:8px 11px;font-family:'Archivo',sans-serif;font-weight:800;
+  font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;cursor:pointer;
+}
+
+/* ---- spectator ---- */
+.myplayer{
+  margin:12px 14px 0;border-radius:var(--r);
+  background:var(--navy);color:#fff;padding:13px 14px;
+  display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:center;
+}
+.myplayer .jersey{background:var(--clay);width:44px;height:44px;font-size:18px}
+.mp-name{font-family:'Archivo',sans-serif;font-weight:800;font-size:16px}
+.mp-status{
+  font-size:11.5px;color:#A8B0C6;margin-top:3px;font-weight:500;
+}
+.mp-status b{color:var(--gold);font-weight:700}
+.mp-line{
+  margin-top:6px;font-family:'Archivo',sans-serif;font-weight:700;
+  font-size:12px;color:#fff;font-variant-numeric:tabular-nums;
+  letter-spacing:.03em;
+}
+.stale{
+  margin:9px 14px 0;font-size:10.5px;color:var(--pencil);
+  display:flex;align-items:center;gap:6px;font-weight:600;
+}
+.stale .dot{width:6px;height:6px;border-radius:50%;background:var(--grass)}
+.stale.old .dot{background:var(--gold)}
+.stale.old{color:var(--gold)}
+
+.pbp{padding:4px 14px 16px;display:grid;gap:0}
+.pbp h3{
+  font-family:'Archivo',sans-serif;font-size:10px;font-weight:800;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--pencil);
+  margin:10px 0 7px;
+}
+.play{
+  display:grid;grid-template-columns:36px 1fr;gap:10px;
+  padding:8px 0;border-top:1px solid var(--line);align-items:start;
+}
+.play .inn{
+  font-family:'Archivo',sans-serif;font-weight:800;font-size:10px;
+  color:var(--pencil);letter-spacing:.04em;padding-top:2px;
+}
+.play .txt{font-size:13px;line-height:1.4}
+.play.mine .txt{font-weight:700}
+.play.mine{background:#FFFBF0;margin:0 -8px;padding-left:8px;padding-right:8px;border-radius:6px}
+.play.score .txt{color:var(--clay);font-weight:700}
+.play.life .txt{color:var(--pencil);font-style:italic;font-size:12px}
+
+/* ---- tab bar ---- */
+.tabs{
+  flex:0 0 auto;display:grid;grid-template-columns:repeat(5,1fr);
+  background:var(--card);border-top:1px solid var(--line);
+  padding:7px 4px 9px;
+}
+.tab{
+  display:grid;justify-items:center;gap:3px;border:0;background:none;
+  cursor:pointer;padding:3px 2px;position:relative;
+}
+.tab .ic{width:21px;height:21px;stroke:var(--pencil);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.tab .nm{font-size:8.5px;font-weight:700;color:var(--pencil);letter-spacing:.02em}
+.tab[aria-selected="true"] .ic{stroke:var(--clay)}
+.tab[aria-selected="true"] .nm{color:var(--clay)}
+.tab.off{opacity:.32}
+.tab.off::after{
+  content:"";position:absolute;top:1px;right:14px;
+  width:5px;height:5px;border-radius:50%;background:var(--gold);
+}
+
+.stub{padding:40px 26px;text-align:center;color:var(--pencil)}
+.stub h2{
+  font-family:'Archivo',sans-serif;font-size:16px;color:var(--navy);
+  margin:0 0 8px;font-weight:800;
+}
+.stub p{font-size:13px;line-height:1.55;margin:0}
+
+.note{
+  margin:10px 14px 16px;padding:10px 12px;border-radius:var(--r);
+  background:#EFEDE6;border:1px dashed var(--line);
+  font-size:11px;line-height:1.5;color:var(--pencil);
+}
+.note b{color:var(--navy);font-weight:700}
+
+/* ---- onboarding ---- */
+.sect{padding:16px 16px 4px}
+.sect h2{
+  font-family:'Archivo',sans-serif;font-size:15px;font-weight:800;
+  margin:0 0 3px;letter-spacing:.01em;
+}
+.sect .sub{font-size:12px;color:var(--pencil);line-height:1.45;margin:0 0 12px}
+
+.tally{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:13px;
+}
+.tally div{
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:9px 10px;box-shadow:var(--shadow);
+}
+.tally .n{
+  font-family:'Archivo',sans-serif;font-weight:900;font-size:21px;line-height:1;
+  font-variant-numeric:tabular-nums;
+}
+.tally .l{
+  font-size:8.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--pencil);margin-top:4px;
+}
+.tally .joined .n{color:var(--grass)}
+.tally .pending .n{color:var(--gold)}
+.tally .attn .n{color:var(--out)}
+
+.fam{
+  display:grid;grid-template-columns:30px 1fr auto;gap:11px;align-items:center;
+  padding:10px 2px;border-top:1px solid var(--line);
+}
+.fam .jn{
+  font-family:'Archivo',sans-serif;font-weight:900;font-size:13px;
+  color:var(--pencil);font-variant-numeric:tabular-nums;text-align:right;
+}
+.fam .nm2{font-size:13.5px;font-weight:600}
+.pill{
+  font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+  padding:4px 8px;border-radius:20px;white-space:nowrap;
+}
+.pill.joined{background:#E4F0E7;color:var(--grass)}
+.pill.pending{background:#FBF1D8;color:#8A6A12}
+.pill.none{background:#F3E5E5;color:var(--out)}
+
+.cta{
+  margin:14px 16px 4px;display:block;width:calc(100% - 32px);
+  border:0;border-radius:var(--r);background:var(--navy);color:#fff;
+  font-family:'Archivo',sans-serif;font-weight:800;font-size:13px;
+  letter-spacing:.05em;text-transform:uppercase;padding:15px;cursor:pointer;
+}
+.cta:active{background:#20305a}
+.cta.ghost{background:transparent;color:var(--navy);border:1px solid var(--line)}
+
+/* parent-facing join card */
+.join{
+  margin:16px;background:var(--card);border:1px solid var(--line);
+  border-radius:14px;padding:22px 18px;text-align:center;box-shadow:var(--shadow);
+}
+.join .crest{
+  width:56px;height:56px;margin:0 auto 13px;border-radius:14px;
+  background:var(--clay);display:grid;place-items:center;
+}
+.join .crest svg{width:30px;height:30px;stroke:#fff;fill:none;stroke-width:2}
+.join h2{
+  font-family:'Archivo',sans-serif;font-size:19px;font-weight:800;
+  margin:0 0 5px;line-height:1.2;
+}
+.join .season{
+  font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--pencil);margin-bottom:13px;
+}
+.join p{font-size:13.5px;line-height:1.55;color:var(--navy);margin:0 0 4px}
+.join p b{color:var(--clay)}
+.getlist{
+  text-align:left;margin:15px 0 4px;display:grid;gap:8px;
+}
+.getlist div{
+  display:grid;grid-template-columns:16px 1fr;gap:9px;
+  font-size:12.5px;line-height:1.4;align-items:start;
+}
+.getlist svg{width:14px;height:14px;stroke:var(--grass);fill:none;stroke-width:2.6;margin-top:2px}
+.fineprint{
+  margin:10px 16px 20px;font-size:10.5px;line-height:1.5;color:var(--pencil);
+  text-align:center;
+}
+
+@media (prefers-reduced-motion:reduce){
+  *{transition:none!important;animation:none!important}
+}
+</style>
+</head>
+<body>
+<div class="phone">
+
+  <div class="switch" role="group" aria-label="Prototype view">
+    <button id="sw-score" aria-pressed="true">Scorekeeper</button>
+    <button id="sw-spec" aria-pressed="false">Spectator</button>
+    <button id="sw-join" aria-pressed="false">Onboarding</button>
+    <button id="sw-other" aria-pressed="false">Other</button>
+  </div>
+
+  <div class="stage">
+
+    <!-- ============ SCOREKEEPER ============ -->
+    <section class="view on" id="v-score">
+      <div class="board">
+        <div class="teams">
+          <div class="trow" id="row-away">
+            <div class="tname">Ridgeview</div><div class="tscore" id="sc-away">0</div>
+          </div>
+          <div class="trow" id="row-home">
+            <div class="tname">Northgate</div><div class="tscore" id="sc-home">0</div>
+          </div>
+        </div>
+        <div class="situation">
+          <div class="inning" id="inning">TOP 1</div>
+          <div class="pips">
+            <div class="pipset"><span class="lbl">B</span><span class="pipdots" id="pips-b"></span></div>
+            <div class="pipset"><span class="lbl">S</span><span class="pipdots" id="pips-s"></span></div>
+            <div class="pipset"><span class="lbl">O</span><span class="pipdots" id="pips-o"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <svg class="diamond" viewBox="0 0 200 200" role="img" aria-labelledby="dtitle">
+          <title id="dtitle">Field diagram</title>
+          <path class="dline" d="M100 170 L165 105 L100 40 L35 105 Z"/>
+          <g id="runners"></g>
+          <text class="baselbl" x="181" y="108">1B</text>
+          <text class="baselbl" x="100" y="30">2B</text>
+          <text class="baselbl" x="19" y="108">3B</text>
+        </svg>
+      </div>
+
+      <div class="batter">
+        <div class="jersey" id="b-num">12</div>
+        <div>
+          <div class="bname" id="b-name">Jack Miller</div>
+          <div class="bmeta" id="b-meta">Batting 1st · CF</div>
+        </div>
+        <div class="bline"><span>Today</span><span id="b-line" style="font-size:13px;color:var(--clay)">0-0</span></div>
+      </div>
+
+      <div class="baton">
+        <div class="t"><b>You're keeping the book.</b> Sarah requested the baton.</div>
+        <button id="pass-baton">Pass</button>
+      </div>
+
+      <div class="pads">
+        <div class="padlbl">Pitch</div>
+        <div class="row3">
+          <button class="k pitch" data-ev="BALL">BALL</button>
+          <button class="k pitch strike" data-ev="STRIKE_SWINGING">STRIKE</button>
+          <button class="k pitch" data-ev="FOUL">FOUL</button>
+        </div>
+
+        <div class="padlbl">On base</div>
+        <div class="row5">
+          <button class="k hit" data-ev="SINGLE">1B</button>
+          <button class="k hit" data-ev="DOUBLE">2B</button>
+          <button class="k hit" data-ev="TRIPLE">3B</button>
+          <button class="k hit" data-ev="HOME_RUN">HR</button>
+          <button class="k hit" data-ev="WALK">BB</button>
+        </div>
+
+        <div class="padlbl">Out</div>
+        <div class="row5">
+          <button class="k out" data-ev="GROUND_OUT">GO</button>
+          <button class="k out" data-ev="FLY_OUT">FO</button>
+          <button class="k out" data-ev="STRIKEOUT">K</button>
+          <button class="k out" data-ev="FIELDERS_CHOICE">FC</button>
+          <button class="k out" data-ev="REACHED_ON_ERROR">E</button>
+        </div>
+
+        <div class="utility">
+          <button class="u undo" id="btn-undo">↶ Undo</button>
+          <button class="u" id="btn-more">More ···</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ SPECTATOR ============ -->
+    <section class="view" id="v-spec">
+      <div class="board">
+        <div class="teams">
+          <div class="trow" id="s-row-away">
+            <div class="tname">Ridgeview</div><div class="tscore" id="s-sc-away">0</div>
+          </div>
+          <div class="trow" id="s-row-home">
+            <div class="tname">Northgate</div><div class="tscore" id="s-sc-home">0</div>
+          </div>
+        </div>
+        <div class="situation">
+          <div class="inning" id="s-inning">TOP 1</div>
+          <div class="pips">
+            <div class="pipset"><span class="lbl">B</span><span class="pipdots" id="s-pips-b"></span></div>
+            <div class="pipset"><span class="lbl">S</span><span class="pipdots" id="s-pips-s"></span></div>
+            <div class="pipset"><span class="lbl">O</span><span class="pipdots" id="s-pips-o"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="myplayer">
+        <div class="jersey">12</div>
+        <div>
+          <div class="mp-name">Jack Miller</div>
+          <div class="mp-status" id="mp-status">In the dugout</div>
+          <div class="mp-line" id="mp-line">0-0 today</div>
+        </div>
+      </div>
+
+      <div class="stale" id="stale"><span class="dot"></span><span id="stale-t">Live · updated just now</span></div>
+
+      <div class="field" style="padding-top:10px">
+        <svg class="diamond" viewBox="0 0 200 200" style="max-width:200px" role="img" aria-label="Field diagram">
+          <path class="dline" d="M100 170 L165 105 L100 40 L35 105 Z"/>
+          <g id="s-runners"></g>
+        </svg>
+      </div>
+
+      <div class="pbp">
+        <h3>Play by play</h3>
+        <div id="feed"></div>
+      </div>
+    </section>
+
+    <!-- ============ ONBOARDING ============ -->
+    <section class="view" id="v-join">
+
+      <div class="sect">
+        <h2>Invite families</h2>
+        <p class="sub">One link per player. Sending it is the assertion — the coach
+          already knows whose number is whose, so there's no approval step on the
+          other end.</p>
+        <div class="tally">
+          <div class="joined"><div class="n" id="t-joined">6</div><div class="l">Joined</div></div>
+          <div class="pending"><div class="n" id="t-pending">5</div><div class="l">Sent</div></div>
+          <div class="attn"><div class="n" id="t-attn">4</div><div class="l">To send</div></div>
+        </div>
+        <div id="fams"></div>
+      </div>
+
+      <button class="cta" id="send-rest">Text the remaining 4</button>
+      <button class="cta ghost" id="copy-team" style="margin-top:8px">Copy team link for assistants</button>
+      <p class="fineprint">Links expire in 30 days and stop working after one use,
+        so a forwarded text won't attach the wrong adult to a child.</p>
+
+      <div class="sect" style="border-top:1px solid var(--line);padding-top:18px">
+        <h2>What a parent sees</h2>
+        <p class="sub">Before any sign-up form. Asking someone to create an account
+          before telling them what it's for is where onboarding dies.</p>
+      </div>
+
+      <div class="join">
+        <div class="crest">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5 6c3 3 3 9 0 12M19 6c-3 3-3 9 0 12"/></svg>
+        </div>
+        <h2>Ridgeview Reds</h2>
+        <div class="season">Spring 2027 · 10U</div>
+        <p>You'll be added as <b>Jack's</b> parent.</p>
+        <div class="getlist">
+          <div><svg viewBox="0 0 24 24"><path d="M4 12l6 6L20 6"/></svg><span>A buzz when Jack is on deck and after every at-bat</span></div>
+          <div><svg viewBox="0 0 24 24"><path d="M4 12l6 6L20 6"/></svg><span>Live scoring you can watch from anywhere</span></div>
+          <div><svg viewBox="0 0 24 24"><path d="M4 12l6 6L20 6"/></svg><span>Jack's stats — visible only to you and the coaches</span></div>
+          <div><svg viewBox="0 0 24 24"><path d="M4 12l6 6L20 6"/></svg><span>Team schedule, RSVPs, and messages</span></div>
+        </div>
+      </div>
+      <button class="cta" id="join-go">Join as Jack's parent</button>
+      <button class="cta ghost" id="join-fan" style="margin-top:8px">I'm a grandparent or family</button>
+      <p class="fineprint">Family members get game alerts and Jack's stats.
+        Only parents can approve roster changes.</p>
+    </section>
+
+    <!-- ============ OTHER TABS ============ -->
+    <section class="view" id="v-other">
+      <div class="stub">
+        <h2>Roster</h2>
+        <p>Player cards, jersey numbers, positions. The walk-up audio panel lives
+           on this screen behind a feature flag — the nav slot exists, the surface
+           stays hidden until the feature ships.</p>
+      </div>
+      <div class="note">
+        <b>Why nothing says "coming soon."</b> Disabled buttons and placeholder
+        labels read as abandoned software to a first-time user. You control the
+        release, so the slot is built and flagged off instead.
+      </div>
+      <div class="stub" style="padding-top:10px">
+        <h2>Messages</h2>
+        <p>One tab, two selectors: Team and Direct. Both scoped to people on this
+           roster.</p>
+      </div>
+    </section>
+
+  </div>
+
+  <nav class="tabs" role="tablist" aria-label="Main">
+    <button class="tab" role="tab" aria-selected="true">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M12 3a9 9 0 100 18 9 9 0 000-18z"/><path d="M5 6c3 3 3 9 0 12M19 6c-3 3-3 9 0 12"/></svg>
+      <span class="nm">Game Day</span>
+    </button>
+    <button class="tab" role="tab" aria-selected="false">
+      <svg class="ic" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+      <span class="nm">Schedule</span>
+    </button>
+    <button class="tab" role="tab" aria-selected="false">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11"/><circle cx="4.5" cy="6" r="1.5"/><circle cx="4.5" cy="12" r="1.5"/><circle cx="4.5" cy="18" r="1.5"/></svg>
+      <span class="nm">Roster</span>
+    </button>
+    <button class="tab" role="tab" aria-selected="false">
+      <svg class="ic" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+      <span class="nm">Messages</span>
+    </button>
+    <button class="tab off" role="tab" aria-selected="false" title="Deferred past v1">
+      <svg class="ic" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="9" cy="11" r="2"/><path d="M3 17l5-4 4 3 3-2 6 5"/></svg>
+      <span class="nm">Media</span>
+    </button>
+  </nav>
+</div>
+
+<script type="module">
+/*__ENGINE__*/
+
+// ===========================================================================
+// Prototype wiring. Everything above this line is the shipping engine, inlined
+// verbatim by build-prototype.js — the buttons below drive real game logic.
+// ===========================================================================
+
+const ROSTER = {
+  a1:{n:'Jack Miller',   j:12, pos:'CF'},
+  a2:{n:'Wu Chen',       j:7,  pos:'SS'},
+  a3:{n:'Luis Ortiz',    j:23, pos:'1B'},
+  a4:{n:'Eli Barnes',    j:4,  pos:'C'},
+  a5:{n:'Sam Whitfield', j:19, pos:'3B'},
+  a6:{n:'Diego Rojas',   j:8,  pos:'LF'},
+  a7:{n:'Owen Pratt',    j:31, pos:'2B'},
+  a8:{n:'Micah Doyle',   j:15, pos:'RF'},
+  a9:{n:'Theo Lindqvist',j:2,  pos:'P'},
+};
+const HOME = {};
+for (let i = 1; i <= 9; i++) HOME['h'+i] = { n:'Northgate '+i, j:i, pos:'' };
+const ALL = { ...ROSTER, ...HOME };
+const NAMES = Object.fromEntries(Object.entries(ALL).map(([k,v]) => [k, v.n]));
+const MY_PLAYER = 'a1';
+
+const lineup = (ids) => ids.map((playerId, i) => ({ playerId, order:i+1, position:ALL[playerId].pos }));
+const CONFIG = {
+  awayLineup: lineup(Object.keys(ROSTER)),
+  homeLineup: lineup(Object.keys(HOME)),
+  awayPitcher:'a9', homePitcher:'h1',
+};
+const RULES = resolveRules({}, 'kidPitch10U');
+
+let seq = 0;
+let events = [ makeEvent(EV.GAME_START, {}, { seq: seq++ }) ];
+let state = reduce(events, RULES, CONFIG, NAMES);
+
+// --- base geometry: the scorebook diamond, home at the bottom --------------
+const BASE_XY = { 1:[165,105], 2:[100,40], 3:[35,105] };
+
+function drawRunners(groupId) {
+  const g = document.getElementById(groupId);
+  if (!g) return;
+  g.innerHTML = '';
+  for (const b of [1,2,3]) {
+    const [x,y] = BASE_XY[b];
+    const occ = state.bases[b];
+    const sq = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    sq.setAttribute('x', x-13); sq.setAttribute('y', y-13);
+    sq.setAttribute('width',26); sq.setAttribute('height',26);
+    sq.setAttribute('rx',4);
+    sq.setAttribute('transform',`rotate(45 ${x} ${y})`);
+    sq.setAttribute('class','base'+(occ?' occ':''));
+    g.appendChild(sq);
+    if (occ) {
+      const t = document.createElementNS('http://www.w3.org/2000/svg','text');
+      t.setAttribute('x',x); t.setAttribute('y',y+1);
+      t.setAttribute('class','basenum');
+      t.textContent = ALL[occ] ? ALL[occ].j : '•';
+      g.appendChild(t);
+    }
+  }
+  // Home plate: the batter's box marker.
+  const hp = document.createElementNS('http://www.w3.org/2000/svg','path');
+  hp.setAttribute('d','M89 163 L111 163 L111 173 L100 180 L89 173 Z');
+  hp.setAttribute('class','base');
+  g.appendChild(hp);
+}
+
+function pips(el, n, total, cls) {
+  if (!el) return;
+  el.innerHTML = '';
+  for (let i = 0; i < total; i++) {
+    const d = document.createElement('span');
+    d.className = 'pip ' + (cls||'') + (i < n ? ' on' : '');
+    el.appendChild(d);
+  }
+}
+
+function battingStatsFor(pid) {
+  const st = computeStats(events, RULES, CONFIG);
+  const b = st.batting[pid];
+  if (!b) return { h:0, ab:0, rbi:0 };
+  return { h:b.H, ab:b.AB, rbi:b.RBI };
+}
+
+function render() {
+  const half = state.isTop ? 'TOP' : 'BOT';
+  const batting = state.isTop ? 'away' : 'home';
+
+  // --- scoreboard (both views) ---
+  for (const p of ['', 's-']) {
+    const away = document.getElementById(p+'sc-away');
+    const home = document.getElementById(p+'sc-home');
+    if (away) away.textContent = state.score.away;
+    if (home) home.textContent = state.score.home;
+    const inn = document.getElementById(p+'inning');
+    if (inn) inn.textContent = state.status === 'final'
+      ? 'FINAL' : `${half} ${state.inning}`;
+    pips(document.getElementById(p+'pips-b'), state.balls, 3);
+    pips(document.getElementById(p+'pips-s'), state.strikes, 2);
+    pips(document.getElementById(p+'pips-o'), state.outs, 2, 'out');
+  }
+  const rowA = document.getElementById('row-away'), rowH = document.getElementById('row-home');
+  rowA.classList.toggle('bat', batting==='away');
+  rowH.classList.toggle('bat', batting==='home');
+  document.getElementById('s-row-away').classList.toggle('bat', batting==='away');
+  document.getElementById('s-row-home').classList.toggle('bat', batting==='home');
+
+  drawRunners('runners');
+  drawRunners('s-runners');
+
+  // --- current batter ---
+  const bid = state.batterId;
+  const info = ALL[bid] || { n:'—', j:'', pos:'' };
+  const slotIdx = state.lineups[batting].findIndex(s => s.playerId === bid);
+  document.getElementById('b-num').textContent = info.j;
+  document.getElementById('b-name').textContent = info.n;
+  document.getElementById('b-meta').textContent =
+    `Batting ${ordinal(slotIdx+1)}${info.pos ? ' · '+info.pos : ''}`;
+  const bs = battingStatsFor(bid);
+  document.getElementById('b-line').textContent =
+    `${bs.h}-for-${bs.ab}${bs.rbi ? `, ${bs.rbi} RBI` : ''}`;
+
+  // --- spectator: my player ---
+  const mine = battingStatsFor(MY_PLAYER);
+  document.getElementById('mp-line').textContent =
+    `${mine.h}-for-${mine.ab}${mine.rbi ? `, ${mine.rbi} RBI` : ''} today`;
+
+  const order = state.lineups.away.map(s => s.playerId);
+  const myIdx = order.indexOf(MY_PLAYER);
+  const curIdx = state.battingIndex.away;
+  let status;
+  if (!state.isTop) {
+    status = 'In the field';
+  } else if (bid === MY_PLAYER) {
+    status = '<b>At bat now</b>';
+  } else {
+    const away = (myIdx - curIdx + order.length) % order.length;
+    status = away === 1
+      ? '<b>On deck</b> — up next'
+      : `${away} batters away`;
+  }
+  document.getElementById('mp-status').innerHTML = status;
+
+  // --- play by play, newest first ---
+  const feed = document.getElementById('feed');
+  feed.innerHTML = '';
+  const plays = [...state.playByPlay].reverse();
+  if (!plays.length) {
+    feed.innerHTML = '<div class="play"><div class="inn"></div><div class="txt" style="color:var(--pencil)">Waiting for the first pitch.</div></div>';
+  }
+  for (const p of plays) {
+    const row = document.createElement('div');
+    const isMine = p.text.startsWith(ALL[MY_PLAYER].n);
+    row.className = 'play'
+      + (p.kind === 'lifecycle' || p.kind === 'inningEnd' ? ' life' : '')
+      + (isMine ? ' mine' : '')
+      + (/run[s]? score/.test(p.text) ? ' score' : '');
+    row.innerHTML =
+      `<div class="inn">${p.kind==='lifecycle' ? '' : (p.isTop?'T':'B')+p.inning}</div>
+       <div class="txt">${p.text}</div>`;
+    feed.appendChild(row);
+  }
+}
+
+const ordinal = (n) => n + (['th','st','nd','rd'][(n%100-20)%10] || ['th','st','nd','rd'][n%100] || 'th');
+
+function push(type, payload = {}) {
+  events.push(makeEvent(type, payload, { seq: seq++ }));
+  state = reduce(events, RULES, CONFIG, NAMES);
+  render();
+}
+
+document.querySelectorAll('button.k[data-ev]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    push(EV[btn.dataset.ev]);
+    if (navigator.vibrate) navigator.vibrate(8);
+  });
+});
+
+document.getElementById('btn-undo').addEventListener('click', () => {
+  const live = events.filter(e => !e.voided);
+  if (live.length <= 1) return;
+  events = live.slice(0, -1);
+  state = reduce(events, RULES, CONFIG, NAMES);
+  render();
+});
+
+document.getElementById('btn-more').addEventListener('click', () => {
+  alert('Contextual drawer: stolen base, caught stealing, wild pitch, passed ball, balk, substitution.\n\nTapping a runner on the diamond opens the same drawer scoped to that runner.');
+});
+
+document.getElementById('pass-baton').addEventListener('click', (e) => {
+  e.target.textContent = 'Passed';
+  e.target.style.background = 'var(--grass)';
+  setTimeout(() => document.querySelector('.baton').style.display = 'none', 550);
+});
+
+// --- prototype view switch -------------------------------------------------
+const FAMILIES = [
+  { j:12, n:'Jack Miller',    status:'joined'      },
+  { j:7,  n:'Wu Chen',        status:'joined'      },
+  { j:23, n:'Luis Ortiz',     status:'joined'      },
+  { j:4,  n:'Eli Barnes',     status:'pending'     },
+  { j:19, n:'Sam Whitfield',  status:'pending'     },
+  { j:8,  n:'Diego Rojas',    status:'joined'      },
+  { j:31, n:'Owen Pratt',     status:'not_invited' },
+  { j:15, n:'Micah Doyle',    status:'pending'     },
+  { j:2,  n:'Theo Lindqvist', status:'not_invited' },
+];
+const PILL = {
+  joined:      ['joined',  'Joined'],
+  pending:     ['pending', 'Sent'],
+  not_invited: ['none',    'Not sent'],
+};
+(function renderFamilies(){
+  const host = document.getElementById('fams');
+  if (!host) return;
+  host.innerHTML = '';
+  for (const f of FAMILIES) {
+    const [cls, label] = PILL[f.status];
+    const row = document.createElement('div');
+    row.className = 'fam';
+    row.innerHTML = `<div class="jn">${f.j}</div>
+      <div class="nm2">${f.n}</div>
+      <span class="pill ${cls}">${label}</span>`;
+    host.appendChild(row);
+  }
+  const count = (s) => FAMILIES.filter(f => f.status === s).length;
+  document.getElementById('t-joined').textContent  = count('joined');
+  document.getElementById('t-pending').textContent = count('pending');
+  document.getElementById('t-attn').textContent    = count('not_invited');
+  const btn = document.getElementById('send-rest');
+  btn.textContent = `Text the remaining ${count('not_invited')}`;
+})();
+
+document.getElementById('send-rest')?.addEventListener('click', () => {
+  alert('Opens the OS share sheet once per family, in sequence — the picker is modal, so firing them in parallel would stack sheets.\n\nEach message is pre-written with that child\'s name and their own single-use link.');
+});
+document.getElementById('copy-team')?.addEventListener('click', (e) => {
+  e.target.textContent = 'Copied';
+  setTimeout(() => e.target.textContent = 'Copy team link for assistants', 1400);
+});
+document.getElementById('join-go')?.addEventListener('click', () => {
+  alert('Redeem runs in one transaction: team membership, the player link, guardianship, and the invite\'s use counter.\n\nLands on Jack\'s player card with notification setup, not a generic dashboard.');
+});
+document.getElementById('join-fan')?.addEventListener('click', () => {
+  alert('Family members are linked to Jack for alerts and stats, but never gain guardian authority — they cannot approve a roster transfer or consent to media on his behalf.');
+});
+
+const views = { 'sw-score':'v-score', 'sw-spec':'v-spec', 'sw-join':'v-join', 'sw-other':'v-other' };
+Object.keys(views).forEach(id => {
+  document.getElementById(id).addEventListener('click', () => {
+    Object.entries(views).forEach(([b,v]) => {
+      const on = b === id;
+      document.getElementById(b).setAttribute('aria-pressed', String(on));
+      document.getElementById(v).classList.toggle('on', on);
+    });
+  });
+});
+
+// --- staleness indicator ---------------------------------------------------
+let lastTouch = Date.now();
+document.addEventListener('click', () => { lastTouch = Date.now(); });
+setInterval(() => {
+  const secs = Math.round((Date.now() - lastTouch) / 1000);
+  const el = document.getElementById('stale');
+  const t = document.getElementById('stale-t');
+  if (secs < 25) { el.classList.remove('old'); t.textContent = 'Live · updated just now'; }
+  else { el.classList.add('old'); t.textContent = `Last update ${secs}s ago — scorer may be offline`; }
+}, 1000);
+
+render();
+</script>
+</body>
+</html>

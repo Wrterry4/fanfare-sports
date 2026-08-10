@@ -1,0 +1,66 @@
+{
+  "expo": {
+    "name": "Fanfare Sports",
+    "slug": "fanfare-sports",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "fanfare",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "com.fanfaresports.app",
+      "supportsTablet": true,
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "associatedDomains": [
+        "applinks:fanfaresports.app"
+      ],
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "audio",
+          "remote-notification"
+        ]
+      }
+    },
+    "android": {
+      "package": "com.fanfaresports.app",
+      "googleServicesFile": "./google-services.json",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "fanfaresports.app",
+              "pathPrefix": "/join"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ]
+    },
+    "plugins": [],
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./public/icons/icon-192.png"
+    },
+    "_pluginsForNative": [
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth",
+      "@react-native-firebase/messaging",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
+        }
+      ]
+    ],
+    "_note": "plugins intentionally empty for web export; see _pluginsForNative when building native"
+  }
+}

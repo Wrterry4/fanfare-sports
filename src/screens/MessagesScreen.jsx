@@ -1,0 +1,242 @@
+/**
+ * MessagesScreen.jsx — Team chat and direct messages.
+ *
+ * Two selectors, both team-scoped. Direct opens on a list of everyone on the
+ * roster rather than an empty inbox, because the first message is the hard one
+ * and nobody wants to search for a name to start it.
+ */
+
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import {
+  View, Text, TextInput, Pressable, StyleSheet, ScrollView,
+  ActivityIndicator, KeyboardAvoidingView, Platform,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import {
+  db, collection, query, orderBy, onSnapshot, addDoc, doc, updateDoc, serverTimestamp,
+} from '../services/firebase';
+import { useGameDay } from '../hooks/useGameDay.js';
+import { useAuth } from '../hooks/AuthProvider.jsx';
+import {
+  subscribeMembers, ensureConversation, conversationId, ROLE_LABELS,
+} from '../services/membership.js';
+import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
+import { multilineStyle } from '../theme/inputs.js';
+
+export default function MessagesScreen() {
+  const { team, loading } = useGameDay();
+  const { user } = useAuth();
+  const [tab, setTab] = useState('team');
+  const [members, setMembers] = useState([]);
+  const [openDm, setOpenDm] = useState(null);
+
+  useEffect(() => {
+    if (!team?.id) return undefined;
+    return subscribeMembers(team.id, setMembers);
+  }, [team?.id]);
+
+  if (loading) return <Centered><ActivityIndicator color={colors.primary} /></Centered>;
+  if (!team) return <Centered><Text style={styles.msg}>No team yet.</Text></Centered>;
+
+  return (
+    <SafeAreaView style={styles.root} edges={['top']}>
+      <View style={styles.header}>
+        <Text style={styles.h1}>
+          {openDm ? (openDm.displayName || 'Direct message') : 'Messages'}
+        </Text>
+        {openDm ? (
+          <Pressable onPress={() => setOpenDm(null)} style={styles.back}>
+            <Text style={styles.backText}>‹ ALL MESSAGES</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.tabs}>
+            {[['team', 'Team chat'], ['direct', 'Direct']].map(([k, l]) => (
+              <Pressable key={k} onPress={() => setTab(k)}
+                style={[styles.tab, tab === k && styles.tabOn]}>
+                <Text style={[styles.tabText, tab === k && styles.tabTextOn]}>{l}</Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+      </View>
+
+      {openDm
+        ? <Thread teamId={team.id} user={user} other={openDm} />
+        : tab === 'team'
+          ? <ChannelThread teamId={team.id} user={user} channel="chatter" />
+          : <DirectList members={members} user={user} onOpen={setOpenDm} />}
+    </SafeAreaView>
+  );
+}
+
+/** Visible to everyone on the team. */
+function ChannelThread({ teamId, user, channel }) {
+  const [messages, setMessages] = useState([]);
+  const path = useMemo(
+    () => collection(db, 'teams', teamId, 'channels', channel, 'messages'), [teamId, channel]);
+
+  useEffect(() => onSnapshot(query(path, orderBy('createdAt', 'asc')),
+    (snap) => setMessages(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+    () => setMessages([])), [path]);
+
+  const send = useCallback((body) => addDoc(path, {
+    senderId: user.uid,
+    senderName: user.displayName || 'Coach',
+    text: body,
+    createdAt: serverTimestamp(),
+    deleted: false,
+  }), [path, user]);
+
+  return <MessageList messages={messages} user={user} onSend={send}
+                      placeholder="Message the team" />;
+}
+
+/** One thread per pair, per team. */
+function Thread({ teamId, user, other }) {
+  const [messages, setMessages] = useState([]);
+  const cid = conversationId(teamId, user.uid, other.uid);
+
+  useEffect(() => {
+    ensureConversation(teamId, other.uid).catch(() => {});
+    const path = collection(db, 'conversations', cid, 'messages');
+    return onSnapshot(query(path, orderBy('createdAt', 'asc')),
+      (snap) => setMessages(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      () => setMessages([]));
+  }, [cid, teamId, other.uid]);
+
+  const send = useCallback(async (body) => {
+    await ensureConversation(teamId, other.uid);
+    await addDoc(collection(db, 'conversations', cid, 'messages'), {
+      senderId: user.uid,
+      senderName: user.displayName || 'Me',
+      text: body,
+      createdAt: serverTimestamp(),
+      deleted: false,
+    });
+    // Powers the list preview without reading every thread's messages.
+    await updateDoc(doc(db, 'conversations', cid), {
+      lastMessage: { text: body, senderId: user.uid, createdAt: new Date() },
+      updatedAt: serverTimestamp(),
+    }).catch(() => {});
+  }, [cid, teamId, other.uid, user]);
+
+  return <MessageList messages={messages} user={user} onSend={send}
+                      placeholder={`Message ${other.displayName || 'them'}`} />;
+}
+
+function DirectList({ members, user, onOpen }) {
+  const others = members.filter((m) => m.uid !== user?.uid);
+  return (
+    <ScrollView contentContainerStyle={styles.scroll}>
+      {others.length === 0 && (
+        <Text style={styles.empty}>
+          You're the only person on this team so far. Share the join code from
+          Settings and anyone who joins will appear here.
+        </Text>
+      )}
+      {others.map((m) => (
+        <Pressable key={m.uid} onPress={() => onOpen(m)} style={styles.person}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>
+              {(m.displayName || ROLE_LABELS[m.role] || '?').slice(0, 1).toUpperCase()}
+            </Text>
+          </View>
+          <View style={styles.flex}>
+            <Text style={styles.personName}>
+              {m.displayName || ROLE_LABELS[m.role] || 'Team member'}
+            </Text>
+            <Text style={styles.personRole}>{ROLE_LABELS[m.role] || m.role}</Text>
+          </View>
+          <Text style={styles.chev}>›</Text>
+        </Pressable>
+      ))}
+    </ScrollView>
+  );
+}
+
+function MessageList({ messages, user, onSend, placeholder }) {
+  const [draft, setDraft] = useState('');
+  const scroller = React.useRef(null);
+
+  const submit = async () => {
+    const body = draft.trim();
+    if (!body) return;
+    setDraft('');
+    try { await onSend(body); } catch { setDraft(body); }   // restore, don't lose it
+  };
+
+  return (
+    <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                          keyboardVerticalOffset={90} style={styles.flex}>
+      <ScrollView ref={scroller} contentContainerStyle={styles.scroll}
+        onContentSizeChange={() => scroller.current?.scrollToEnd({ animated: true })}>
+        {messages.length === 0 && <Text style={styles.empty}>No messages yet.</Text>}
+        {messages.map((m) => {
+          const mine = m.senderId === user?.uid;
+          return (
+            <View key={m.id} style={[styles.bubble, mine && styles.mine]}>
+              {!mine && <Text style={styles.sender}>{m.senderName}</Text>}
+              <Text style={[styles.body, mine && styles.bodyMine]}>{m.text}</Text>
+            </View>
+          );
+        })}
+      </ScrollView>
+
+      <View style={styles.composer}>
+        <TextInput value={draft} onChangeText={setDraft} style={[multilineStyle, styles.flex]}
+          placeholder={placeholder} placeholderTextColor="#A0A8B8" multiline />
+        <Pressable onPress={submit} style={styles.send}>
+          <Text style={styles.sendText}>SEND</Text>
+        </Pressable>
+      </View>
+    </KeyboardAvoidingView>
+  );
+}
+
+const Centered = ({ children }) => (
+  <SafeAreaView style={styles.centered}>{children}</SafeAreaView>
+);
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.chalk },
+  flex: { flex: 1 },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chalk, padding: spacing.xl },
+  header: { backgroundColor: colors.navy, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  h1: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 18, color: '#FFF', marginBottom: spacing.sm },
+  tabs: { flexDirection: 'row', gap: 6 },
+  tab: { paddingHorizontal: 13, paddingVertical: 7, borderRadius: radius.pill, backgroundColor: 'rgba(255,255,255,0.10)' },
+  tabOn: { backgroundColor: '#FFF' },
+  tabText: { ...text.bodyStrong, fontSize: 12.5, color: '#A8B0C6' },
+  tabTextOn: { color: colors.navy },
+  back: { alignSelf: 'flex-start' },
+  backText: { ...text.buttonSecondary, fontSize: 11, color: '#A8B0C6', letterSpacing: 0.6 },
+  scroll: { padding: spacing.md, paddingBottom: spacing.lg },
+  empty: { ...text.body, color: colors.pencil, textAlign: 'center', paddingVertical: 40, lineHeight: 19 },
+  person: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line,
+    borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm, ...shadow.card,
+  },
+  avatar: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { fontFamily: 'Archivo', fontWeight: '900', fontSize: 15, color: '#FFF' },
+  personName: { fontFamily: 'Archivo', fontWeight: '700', fontSize: 15, color: colors.navy },
+  personRole: { ...text.body, fontSize: 11.5, color: colors.pencil, marginTop: 2 },
+  chev: { fontSize: 22, color: colors.pencil, paddingHorizontal: 4 },
+  bubble: {
+    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line,
+    borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm,
+    alignSelf: 'flex-start', maxWidth: '86%',
+  },
+  mine: { alignSelf: 'flex-end', backgroundColor: colors.navy, borderColor: colors.navy },
+  sender: { ...text.label, color: colors.pencil, marginBottom: 3 },
+  body: { ...text.body, fontSize: 15, color: colors.navy, lineHeight: 20 },
+  bodyMine: { color: '#FFF' },
+  composer: {
+    flexDirection: 'row', gap: spacing.sm, padding: spacing.md,
+    borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.card,
+  },
+  send: { paddingHorizontal: 16, borderRadius: radius.md, backgroundColor: colors.navy, alignItems: 'center', justifyContent: 'center' },
+  sendText: { ...text.buttonSecondary, fontSize: 11, color: '#FFF', letterSpacing: 0.8 },
+  msg: { ...text.body, color: colors.pencil, textAlign: 'center' },
+});
