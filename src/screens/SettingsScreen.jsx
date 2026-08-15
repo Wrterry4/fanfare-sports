@@ -9,16 +9,23 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, Pressable, StyleSheet, ScrollView, Switch,
-  ActivityIndicator, Alert, Platform, KeyboardAvoidingView,
+  ActivityIndicator, Platform, KeyboardAvoidingView, Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { db, doc, updateDoc } from '../services/firebase';
 import { useGameDay } from '../hooks/useGameDay.js';
 import { useAuth } from '../hooks/AuthProvider.jsx';
-import { signOut } from '../services/authService.js';
-import { subscribeMembers, buildJoinUrl, ROLE_LABELS } from '../services/membership.js';
+import {
+  subscribeMembers, buildJoinUrl, ROLE_LABELS,
+  subscribePendingClaims, resolvePlayerClaim,
+} from '../services/membership.js';
+import { useMyRole } from '../hooks/useMyRole.js';
+import NotificationSettings from '../components/NotificationSettings.jsx';
 import { RULE_PRESETS, RULE_BOUNDS, PRESET_ORDER } from '../sports/baseball/rules.js';
+import { confirm, notify } from '../utils/confirm.js';
+import AppHeader from '../components/AppHeader.jsx';
+import AccountSheet from '../components/AccountSheet.jsx';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 import { inputStyle } from '../theme/inputs.js';
 
@@ -50,6 +57,10 @@ export default function SettingsScreen() {
   const [rules, setRules] = useState(null);
   const [members, setMembers] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [claims, setClaims] = useState([]);
+  const [copied, setCopied] = useState(false);
+  const { isStaff, isFan, member } = useMyRole();
 
   useEffect(() => { if (team?.rules) setRules({ ...team.rules }); }, [team?.id]);
   useEffect(() => {
@@ -57,55 +68,119 @@ export default function SettingsScreen() {
     return subscribeMembers(team.id, setMembers);
   }, [team?.id]);
 
+  useEffect(() => {
+    if (!team?.id || !isStaff) return undefined;
+    return subscribePendingClaims(team.id, setClaims);
+  }, [team?.id, isStaff]);
+
+  /**
+   * Builds the link inside the callback rather than closing over it.
+   *
+   * The dependency array used to name `joinUrl`, which is declared further
+   * down after the early returns — and a dependency array is evaluated during
+   * render, so it read the binding before its declaration. That's a temporal
+   * dead zone error, and it took down every screen that mounts Settings.
+   */
+  const copyInvite = useCallback(async () => {
+    if (!team) return;
+    const origin = Platform.OS === 'web' && typeof window !== 'undefined'
+      ? window.location.origin : 'https://fanfare-sports.web.app';
+    const url = buildJoinUrl(origin, team.id, team.joinCode);
+    const message =
+      `You're invited to follow ${team.name} on Fanfare Sports — live scoring, ` +
+      `stats, and team messages.\n\nJoin here: ${url}\n\nJoin code: ${team.joinCode}`;
+    try {
+      if (Platform.OS === 'web' && navigator?.clipboard) {
+        await navigator.clipboard.writeText(message);
+      } else {
+        await Share.share({ message });
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { notify('Could not copy', 'Long-press the code to copy it manually.'); }
+  }, [team]);
+
   const save = useCallback(async () => {
     setSaving(true);
     try {
       await updateDoc(doc(db, 'teams', team.id), { rules });
-      Alert.alert('Saved', 'Applies to games created from now on. Games already played keep their own rules.');
-    } catch (e) { Alert.alert('Could not save', e.message); }
+      notify('Saved', 'Applies to games created from now on. Games already played keep their own rules.');
+    } catch (e) { notify('Could not save', e.message); }
     setSaving(false);
   }, [team?.id, rules]);
 
   if (loading || !rules) return <Centered><ActivityIndicator color={colors.primary} /></Centered>;
   if (!team) return <Centered><Text style={styles.msg}>No team yet.</Text></Centered>;
 
-  const origin = Platform.OS === 'web' && typeof window !== 'undefined'
-    ? window.location.origin : 'https://fanfare-sports.web.app';
-  const joinUrl = buildJoinUrl(origin, team.id, team.joinCode);
+  // Grandparents and family follow one child. They aren't part of the team's
+  // adult roster, so they don't appear in this list — but staff can still see
+  // them, otherwise nobody could manage who they'd let in.
+  const visibleMembers = isStaff ? members : members.filter((m) => m.role !== 'fan');
 
   const setNum = (k, v) => setRules((r) => ({ ...r, [k]: v === '' ? null : Number(v) }));
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <Text style={styles.h1}>Settings</Text>
-        <Text style={styles.h2}>{team.name} · {team.season}</Text>
-      </View>
+      <AppHeader team={team} onMenu={() => setMenu(true)} />
+      <AccountSheet visible={menu} onClose={() => setMenu(false)} />
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
 
           <Section title="Invite people"
-                   sub="Anyone with this code can join the team. They won't see a player's stats until a coach links them to that child.">
+                   sub="Anyone with this code can join the team. They see a player's stats only after you link them to that child.">
             <View style={styles.codeBox}>
               <Text style={styles.code}>{team.joinCode}</Text>
             </View>
-            <Text style={styles.url} selectable>{joinUrl}</Text>
+            <Pressable onPress={copyInvite} style={styles.copyBtn}>
+              <Text style={styles.copyBtnText}>{copied ? 'COPIED ✓' : 'COPY INVITE'}</Text>
+            </Pressable>
             <Text style={styles.hint}>
-              Text this link. It opens straight to the join screen with the code
-              filled in.
+              Copies a short message with the link. Paste it into a text or your
+              team's group chat.
             </Text>
           </Section>
 
-          <Section title={`On this team · ${members.length}`}>
-            {members.map((m) => (
+          {isStaff && claims.length > 0 && (
+            <Section title={`Requests · ${claims.length}`}
+                     sub="Someone has asked to be linked to a player.">
+              {claims.map((c) => (
+                <View key={c.id} style={styles.claimRow}>
+                  <View style={styles.flex}>
+                    <Text style={styles.claimName}>{c.requestedByName}</Text>
+                    <Text style={styles.claimMeta}>
+                      wants to be linked as {c.kind === 'parent' ? 'a parent' : 'family'}
+                    </Text>
+                  </View>
+                  <Pressable onPress={() => resolvePlayerClaim(c.id, false)}
+                    style={[styles.claimBtn, styles.claimGhost]}>
+                    <Text style={[styles.claimBtnText, { color: colors.pencil }]}>DENY</Text>
+                  </Pressable>
+                  <Pressable onPress={() => resolvePlayerClaim(c.id, true)} style={styles.claimBtn}>
+                    <Text style={styles.claimBtnText}>APPROVE</Text>
+                  </Pressable>
+                </View>
+              ))}
+            </Section>
+          )}
+
+          <Section title={`On this team · ${visibleMembers.length}`}>
+            {visibleMembers.map((m) => (
               <View key={m.uid} style={styles.memberRow}>
-                <Text style={styles.memberName}>
-                  {m.displayName || (m.uid === user?.uid ? 'You' : 'Team member')}
-                </Text>
-                <Text style={styles.memberRole}>{ROLE_LABELS[m.role] || m.role}</Text>
+                <View style={styles.flex}>
+                  <Text style={styles.memberName}>
+                    {m.displayName || (m.uid === user?.uid ? 'You' : 'Team member')}
+                  </Text>
+                  <Text style={styles.memberRole}>{ROLE_LABELS[m.role] || m.role}</Text>
+                </View>
+                {m.uid === user?.uid && <Text style={styles.youTag}>YOU</Text>}
               </View>
             ))}
+          </Section>
+
+          <Section title="Notifications"
+                   sub="Yours, on this team. Everyone chooses their own.">
+            <NotificationSettings team={team} member={member} isFan={isFan} />
           </Section>
 
           <Section title="Start from a preset"
@@ -145,13 +220,6 @@ export default function SettingsScreen() {
 
           <Pressable onPress={save} disabled={saving} style={styles.cta}>
             {saving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.ctaText}>SAVE SETTINGS</Text>}
-          </Pressable>
-
-          <Pressable onPress={() => Alert.alert('Sign out?', '', [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Sign out', style: 'destructive', onPress: () => signOut() },
-          ])} style={[styles.cta, styles.ctaGhost]}>
-            <Text style={[styles.ctaText, { color: colors.out }]}>SIGN OUT</Text>
           </Pressable>
 
         </ScrollView>
@@ -231,7 +299,25 @@ const styles = StyleSheet.create({
   sectionSub: { ...text.body, fontSize: 12, color: colors.pencil, marginTop: 4, marginBottom: spacing.md, lineHeight: 17 },
   codeBox: { backgroundColor: colors.navy, borderRadius: radius.md, paddingVertical: 16, alignItems: 'center', marginTop: spacing.sm },
   code: { fontFamily: 'Archivo', fontWeight: '900', fontSize: 30, color: '#FFF', letterSpacing: 5 },
-  url: { ...text.body, fontSize: 11.5, color: colors.primary, marginTop: spacing.md, lineHeight: 17 },
+  copyBtn: {
+    height: 46, borderRadius: radius.md, backgroundColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center', marginTop: spacing.md,
+  },
+  copyBtnText: { ...text.buttonSecondary, color: '#FFF', letterSpacing: 0.8 },
+  claimRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.line,
+  },
+  claimName: { ...text.bodyStrong, fontSize: 14, color: colors.navy },
+  claimMeta: { ...text.body, fontSize: 11.5, color: colors.pencil, marginTop: 2 },
+  claimBtn: {
+    paddingHorizontal: 11, paddingVertical: 8, borderRadius: radius.sm,
+    backgroundColor: colors.navy,
+  },
+  claimGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.line },
+  claimBtnText: { ...text.buttonSecondary, fontSize: 10, color: '#FFF', letterSpacing: 0.6 },
+  youTag: { ...text.label, fontSize: 8.5, color: colors.primary },
+  flex: { flex: 1 },
   hint: { ...text.body, fontSize: 11.5, color: colors.pencil, marginTop: 6, lineHeight: 16 },
   memberRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.line },
   memberName: { ...text.bodyStrong, fontSize: 14, color: colors.navy },

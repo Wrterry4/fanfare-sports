@@ -1,0 +1,264 @@
+/**
+ * AccountSheet.jsx — The hamburger menu.
+ *
+ * Account-level, not team-level: who you are, and which team you're looking
+ * at. Team *settings* stay on the Settings tab, because those belong to the
+ * team rather than to you.
+ *
+ * Slides from the left, which is where the button is.
+ */
+
+import React, { useState, useEffect, useCallback } from 'react';
+import {
+  View, Text, TextInput, Pressable, Modal, StyleSheet, ScrollView,
+  ActivityIndicator, KeyboardAvoidingView, Platform,
+} from 'react-native';
+
+import { db, doc, getDoc, setDoc, updateDoc, deleteDoc } from '../services/firebase';
+import { useAuth } from '../hooks/AuthProvider.jsx';
+import { useActiveTeam } from '../hooks/ActiveTeam.jsx';
+import { useMyTeamPlayers } from '../hooks/useMyTeamPlayers.js';
+import { signOut } from '../services/authService.js';
+import { confirm, notify } from '../utils/confirm.js';
+import { colors, radius, spacing, text } from '../theme/tokens.js';
+import { inputStyle } from '../theme/inputs.js';
+
+export default function AccountSheet({ visible, onClose }) {
+  const { user } = useAuth();
+  const { team, teams, select } = useActiveTeam();
+  const [displayName, setDisplayName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [renaming, setRenaming] = useState(null);
+  const [newName, setNewName] = useState('');
+  const byTeam = useMyTeamPlayers(teams);
+
+  useEffect(() => {
+    if (!visible || !user?.uid) return;
+    getDoc(doc(db, 'users', user.uid))
+      .then((snap) => {
+        const d = snap.data() || {};
+        setDisplayName(d.displayName || user.displayName || '');
+        setPhone(d.phone || '');
+        setDirty(false);
+      })
+      .catch(() => {});
+  }, [visible, user?.uid]);
+
+  const save = useCallback(async () => {
+    setBusy(true);
+    try {
+      await setDoc(doc(db, 'users', user.uid), {
+        displayName: displayName.trim(),
+        phone: phone.trim() || null,
+      }, { merge: true });
+      setDirty(false);
+      notify('Saved');
+    } catch (e) { notify('Could not save', e.message); }
+    setBusy(false);
+  }, [user?.uid, displayName, phone]);
+
+  const renameTeam = useCallback(async (t) => {
+    if (!newName.trim()) return;
+    try {
+      await updateDoc(doc(db, 'teams', t.id), { name: newName.trim() });
+      setRenaming(null);
+    } catch (e) { notify('Could not rename', e.message); }
+  }, [newName]);
+
+  /**
+   * Leaving removes your membership. Deleting is only offered to whoever
+   * created the team, and only removes the team document — players keep their
+   * own records and their career history, which is the entire reason they live
+   * at the root rather than inside a team.
+   */
+  const leaveTeam = useCallback(async (t) => {
+    const owner = t.createdBy === user?.uid;
+    const ok = await confirm({
+      title: owner ? `Delete ${t.name}?` : `Leave ${t.name}?`,
+      message: owner
+        ? "The team and its schedule go away. Players keep their own records and stats."
+        : "You'll stop seeing this team's games and messages.",
+      confirmLabel: owner ? 'Delete' : 'Leave',
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await deleteDoc(doc(db, 'teams', t.id, 'members', user.uid));
+      if (owner) await deleteDoc(doc(db, 'teams', t.id)).catch(() => {});
+      // The team list is driven by users/{uid}.teamIds, which a Cloud Function
+      // keeps in step with membership — no client write needed here.
+    } catch (e) { notify('Could not update', e.message); }
+  }, [user?.uid]);
+
+  const doSignOut = useCallback(async () => {
+    const ok = await confirm({ title: 'Sign out?', confirmLabel: 'Sign out', destructive: true });
+    if (ok) { onClose(); signOut(); }
+  }, [onClose]);
+
+  if (!visible) return null;
+
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.row}>
+        <View style={styles.panel}>
+          <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
+            <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
+              <View style={styles.head}>
+                <Text style={styles.headTitle}>Account</Text>
+                <Pressable onPress={onClose} hitSlop={10}>
+                  <Text style={styles.close}>✕</Text>
+                </Pressable>
+              </View>
+
+              <Text style={styles.sectionLabel}>YOUR DETAILS</Text>
+              <Text style={styles.label}>Name</Text>
+              <TextInput value={displayName}
+                onChangeText={(v) => { setDisplayName(v); setDirty(true); }}
+                style={inputStyle} autoCapitalize="words"
+                placeholder="Wallace Terry" placeholderTextColor="#A0A8B8" />
+
+              <Text style={[styles.label, { marginTop: spacing.md }]}>Phone</Text>
+              <TextInput value={phone}
+                onChangeText={(v) => { setPhone(v); setDirty(true); }}
+                style={inputStyle} keyboardType="phone-pad"
+                placeholder="Optional" placeholderTextColor="#A0A8B8" />
+
+              <Text style={[styles.label, { marginTop: spacing.md }]}>Email</Text>
+              <View style={[inputStyle, styles.readonly]}>
+                <Text style={styles.readonlyText} numberOfLines={1}>{user?.email}</Text>
+              </View>
+              <Text style={styles.hint}>
+                Changing your email means signing in again, so it's handled
+                separately.
+              </Text>
+
+              {dirty && (
+                <Pressable onPress={save} disabled={busy} style={styles.cta}>
+                  {busy ? <ActivityIndicator color="#FFF" />
+                        : <Text style={styles.ctaText}>SAVE</Text>}
+                </Pressable>
+              )}
+
+              <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>
+                {teams.length > 1 ? 'YOUR TEAMS' : 'YOUR TEAM'}
+              </Text>
+              {teams.map((t) => {
+                const kids = byTeam[t.id] || [];
+                const isRenaming = renaming === t.id;
+                return (
+                  <View key={t.id}
+                    style={[styles.teamRow, t.id === team?.id && styles.teamRowOn]}>
+                    {isRenaming ? (
+                      <View style={styles.flex}>
+                        <TextInput value={newName} onChangeText={setNewName}
+                          style={inputStyle} autoFocus autoCapitalize="words" />
+                        <View style={styles.renameBtns}>
+                          <Pressable onPress={() => setRenaming(null)} style={styles.tinyGhost}>
+                            <Text style={styles.tinyGhostText}>CANCEL</Text>
+                          </Pressable>
+                          <Pressable onPress={() => renameTeam(t)} style={styles.tiny}>
+                            <Text style={styles.tinyText}>SAVE</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    ) : (
+                      <>
+                        <Pressable style={styles.flex}
+                          onPress={() => { select(t.id); onClose(); }}>
+                          {/* Whose kid is on this team — the fastest way to tell
+                              two teams apart when you're tracking more than one. */}
+                          {kids.length > 0 && (
+                            <Text style={styles.kidLine} numberOfLines={1}>
+                              {kids.map((k) => k.firstName).join(' & ')}
+                            </Text>
+                          )}
+                          <Text style={[styles.teamName, t.id === team?.id && styles.teamNameOn]}>
+                            {t.name}
+                          </Text>
+                          <Text style={styles.teamMeta}>
+                            {t.season}{t.division ? ` · ${t.division}` : ''}
+                          </Text>
+                        </Pressable>
+                        <View style={styles.teamActions}>
+                          {t.createdBy === user?.uid && (
+                            <Pressable hitSlop={8}
+                              onPress={() => { setRenaming(t.id); setNewName(t.name); }}>
+                              <Text style={styles.teamAction}>RENAME</Text>
+                            </Pressable>
+                          )}
+                          <Pressable hitSlop={8} onPress={() => leaveTeam(t)}>
+                            <Text style={[styles.teamAction, { color: colors.out }]}>
+                              {t.createdBy === user?.uid ? 'DELETE' : 'LEAVE'}
+                            </Text>
+                          </Pressable>
+                        </View>
+                      </>
+                    )}
+                  </View>
+                );
+              })}
+              {teams.length === 0 && (
+                <Text style={styles.hint}>You're not on a team yet.</Text>
+              )}
+
+              <Pressable onPress={doSignOut} style={[styles.cta, styles.ctaGhost]}>
+                <Text style={[styles.ctaText, { color: colors.out }]}>SIGN OUT</Text>
+              </Pressable>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </View>
+
+        <Pressable style={styles.backdrop} onPress={onClose} />
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  row: { flex: 1, flexDirection: 'row' },
+  flex: { flex: 1 },
+  panel: {
+    width: '86%', maxWidth: 380, backgroundColor: colors.chalk,
+    shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 16,
+    shadowOffset: { width: 2, height: 0 }, elevation: 16,
+  },
+  backdrop: { flex: 1, backgroundColor: 'rgba(15,23,42,0.4)' },
+  scroll: { padding: spacing.lg, paddingTop: 54, paddingBottom: 40 },
+  head: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: spacing.lg,
+  },
+  headTitle: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 21, color: colors.navy },
+  close: { fontSize: 20, color: colors.pencil, paddingHorizontal: 4 },
+  sectionLabel: { ...text.label, color: colors.pencil, marginBottom: spacing.md },
+  label: { ...text.label, color: colors.pencil, marginBottom: 5 },
+  readonly: { justifyContent: 'center', backgroundColor: '#F1F3F7' },
+  readonlyText: { ...text.body, fontSize: 15, color: colors.pencil },
+  hint: { ...text.body, fontSize: 11.5, color: colors.pencil, marginTop: 6, lineHeight: 16 },
+  cta: {
+    height: 48, borderRadius: radius.md, backgroundColor: colors.navy,
+    alignItems: 'center', justifyContent: 'center', marginTop: spacing.lg,
+  },
+  ctaGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.line },
+  ctaText: { ...text.buttonSecondary, color: '#FFF', letterSpacing: 0.8 },
+  teamRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line,
+    borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm,
+  },
+  teamRowOn: { borderColor: colors.primary, backgroundColor: '#F5F8FF' },
+  teamName: { fontFamily: 'Archivo', fontWeight: '700', fontSize: 15, color: colors.navy },
+  kidLine: { ...text.label, fontSize: 8.5, color: colors.primary, marginBottom: 3 },
+  teamActions: { alignItems: 'flex-end', gap: 6 },
+  teamAction: { ...text.label, fontSize: 8.5, color: colors.pencil },
+  renameBtns: { flexDirection: 'row', gap: 6, marginTop: 6, justifyContent: 'flex-end' },
+  tiny: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.sm, backgroundColor: colors.navy },
+  tinyText: { ...text.buttonSecondary, fontSize: 9.5, color: '#FFF' },
+  tinyGhost: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.line },
+  tinyGhostText: { ...text.buttonSecondary, fontSize: 9.5, color: colors.pencil },
+  teamNameOn: { color: colors.primary },
+  teamMeta: { ...text.body, fontSize: 11.5, color: colors.pencil, marginTop: 2 },
+  check: { fontSize: 16, color: colors.primary, fontWeight: '700' },
+});

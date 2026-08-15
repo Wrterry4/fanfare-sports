@@ -555,6 +555,11 @@ export function applyEvent(state, event, rules, names) {
       next = handlePitch(state, event, rules);
       break;
 
+    // Pitcher's count only: no ball, no strike, no effect on the at-bat.
+    case EV.PITCH_TALLY:
+      next = addPitches(state, 1);
+      break;
+
     case EV.PITCHER_CHANGE: {
       next = clone(state);
       next.pitchers[fieldingSide(next)] = event.payload.playerId;

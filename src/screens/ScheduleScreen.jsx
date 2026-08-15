@@ -1,41 +1,48 @@
 /**
  * ScheduleScreen.jsx — Games.
  *
- * Only the opponent is required. Everything else — date, time, park, field,
- * notes — is optional, because a coach entering a season's schedule from a
- * league PDF often has half the details and shouldn't be blocked on the rest.
+ * Same two gestures as Roster: ADD in the header toggles a persistent form;
+ * tapping a game expands it in place for details and editing.
  *
- * The form stays open after saving so a full schedule goes in one sitting.
+ * Only the opponent is required. A coach entering a season from a league PDF
+ * often has half the details and shouldn't be blocked on the rest.
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, TextInput, Pressable, StyleSheet, ScrollView,
-  ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
+  ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import {
-  db, collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc,
-} from '../services/firebase';
+import { db, collection, query, orderBy, onSnapshot } from '../services/firebase';
 import { useGameDay } from '../hooks/useGameDay.js';
-import { createGame } from '../services/bootstrap.js';
+import { createEvent, updateEvent, deleteEvent } from '../services/eventService.js';
+import RsvpRow from '../components/RsvpRow.jsx';
+import {
+  EVENT_TYPES, EVENT_ORDER, typeOf, isGame, eventTitle, fieldsFor,
+} from '../shared/eventTypes.js';
+import { confirm, notify } from '../utils/confirm.js';
+import { DateField, TimeField, combineDateTime, splitDateTime } from '../components/DateField';
+import AppHeader, { HeaderButton } from '../components/AppHeader.jsx';
+import FinalLineScore from '../components/FinalLineScore.jsx';
+import AccountSheet from '../components/AccountSheet.jsx';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 import { inputStyle, multilineStyle } from '../theme/inputs.js';
 
-const blank = {
-  opponent: '', homeOrAway: 'home', dateStr: '', timeStr: '',
+const emptyForm = () => ({
+  type: EVENT_TYPES.GAME,
+  title: '', opponent: '', homeOrAway: 'home',
+  dateStr: splitDateTime(new Date()).dateStr, timeStr: '17:30',
   park: '', field: '', notes: '',
-};
+});
 
 export default function ScheduleScreen() {
-  const { team, rules, loading } = useGameDay();
+  const { team, rules, roster, loading } = useGameDay();
   const [games, setGames] = useState([]);
-  const [form, setForm] = useState(blank);
-  const [editingId, setEditingId] = useState(null);
-  const [expanded, setExpanded] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const opponentRef = useRef(null);
+  const [adding, setAdding] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+  const [menu, setMenu] = useState(false);
 
   useEffect(() => {
     if (!team?.id) return undefined;
@@ -44,192 +51,358 @@ export default function ScheduleScreen() {
       setGames(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => setGames([]));
   }, [team?.id]);
 
-  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-
-  const save = useCallback(async () => {
-    if (!form.opponent.trim()) { Alert.alert('Who are you playing?'); return; }
-    setBusy(true);
-    try {
-      const when = parseWhen(form.dateStr, form.timeStr);
-      const payload = {
-        opponent: form.opponent.trim(),
-        homeOrAway: form.homeOrAway,
-        date: when,
-        park: form.park.trim() || null,
-        field: form.field.trim() || null,
-        notes: form.notes.trim() || null,
-      };
-      if (editingId) {
-        await updateDoc(doc(db, 'teams', team.id, 'games', editingId), payload);
-        setEditingId(null);
-      } else {
-        await createGame({ teamId: team.id, rules, ...payload });
-      }
-      setForm(blank);
-      setTimeout(() => opponentRef.current?.focus(), 60);
-    } catch (e) { Alert.alert('Could not save', e.message); }
-    setBusy(false);
-  }, [form, team?.id, rules, editingId]);
-
-  const beginEdit = (g) => {
-    const d = g.date?.toDate?.() ?? (g.date ? new Date(g.date) : null);
-    setEditingId(g.id);
-    setForm({
-      opponent: g.opponent || '', homeOrAway: g.homeOrAway || 'home',
-      dateStr: d && !isNaN(d) ? `${d.getMonth() + 1}/${d.getDate()}` : '',
-      timeStr: d && !isNaN(d) ? formatTime(d) : '',
-      park: g.park || '', field: g.field || '', notes: g.notes || '',
+  const remove = useCallback(async (g) => {
+    const ok = await confirm({
+      title: `Delete ${eventTitle(g, team?.name)}?`,
+      message: 'This cannot be undone.',
+      confirmLabel: 'Delete', destructive: true,
     });
-  };
+    if (!ok) return;
+    try { await deleteEvent(team.id, g.id); setExpandedId(null); }
+    catch (e) { notify('Could not delete', e.message); }
+  }, [team?.id]);
 
-  const setStatus = async (g, status) => {
-    try { await updateDoc(doc(db, 'teams', team.id, 'games', g.id), { status }); }
-    catch (e) { Alert.alert('Could not update', e.message); }
-  };
-
-  const remove = (g) => Alert.alert(`Delete game vs ${g.opponent}?`, 'This cannot be undone.',
-    [{ text: 'Cancel', style: 'cancel' },
-     { text: 'Delete', style: 'destructive',
-       onPress: () => deleteDoc(doc(db, 'teams', team.id, 'games', g.id)).catch(() => {}) }]);
+  const setStatus = useCallback(async (g, status) => {
+    const patch = { status };
+    if (status === 'live' && !g.actualStartAt) patch.actualStartAt = new Date();
+    try { await updateEvent(team.id, g.id, patch); }
+    catch (e) { notify('Could not update', e.message); }
+  }, [team?.id]);
 
   if (loading) return <Centered><ActivityIndicator color={colors.primary} /></Centered>;
   if (!team) return <Centered><Text style={styles.msg}>No team yet.</Text></Centered>;
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <Text style={styles.h1}>Schedule</Text>
-        <Text style={styles.h2}>{games.length} game{games.length === 1 ? '' : 's'}</Text>
-      </View>
+      <AppHeader
+        team={team}
+        onMenu={() => setMenu(true)}
+        right={<HeaderButton label={adding ? 'DONE' : '+ GAME'} active={adding}
+                 onPress={() => setAdding((a) => !a)} />}
+      />
+      <AccountSheet visible={menu} onClose={() => setMenu(false)} />
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          <View style={styles.form}>
-            <Text style={styles.formTitle}>{editingId ? 'Edit game' : 'Add game'}</Text>
+          {adding && <AddGameForm team={team} rules={rules} onDone={() => setAdding(false)} />}
 
-            <Text style={styles.label}>Opponent *</Text>
-            <TextInput ref={opponentRef} value={form.opponent} onChangeText={(v) => set('opponent', v)}
-              style={inputStyle} placeholder="Northgate" placeholderTextColor="#A0A8B8"
-              autoCapitalize="words" />
+          {games.length === 0 && !adding && (
+            <Text style={styles.empty}>No games yet. Tap + GAME to add one.</Text>
+          )}
 
-            <View style={[styles.chips, { marginTop: spacing.md }]}>
-              {[['home', 'Home'], ['away', 'Away']].map(([k, l]) => (
-                <Pressable key={k} onPress={() => set('homeOrAway', k)}
-                  style={[styles.chip, form.homeOrAway === k && styles.chipOn]}>
-                  <Text style={[styles.chipText, form.homeOrAway === k && styles.chipTextOn]}>{l}</Text>
-                </Pressable>
-              ))}
-            </View>
-
-            <View style={styles.row}>
-              <View style={styles.flex}>
-                <Text style={styles.label}>Date</Text>
-                <TextInput value={form.dateStr} onChangeText={(v) => set('dateStr', v)}
-                  style={inputStyle} placeholder="4/12" placeholderTextColor="#A0A8B8" />
-              </View>
-              <View style={styles.flex}>
-                <Text style={styles.label}>Time</Text>
-                <TextInput value={form.timeStr} onChangeText={(v) => set('timeStr', v)}
-                  style={inputStyle} placeholder="5:30 PM" placeholderTextColor="#A0A8B8" />
-              </View>
-            </View>
-
-            <View style={[styles.row, { marginTop: spacing.md }]}>
-              <View style={styles.flex}>
-                <Text style={styles.label}>Park</Text>
-                <TextInput value={form.park} onChangeText={(v) => set('park', v)}
-                  style={inputStyle} placeholder="Rowlett Creek" placeholderTextColor="#A0A8B8"
-                  autoCapitalize="words" />
-              </View>
-              <View style={{ width: 90 }}>
-                <Text style={styles.label}>Field</Text>
-                <TextInput value={form.field} onChangeText={(v) => set('field', v)}
-                  style={inputStyle} placeholder="4" placeholderTextColor="#A0A8B8" />
-              </View>
-            </View>
-
-            <Text style={[styles.label, { marginTop: spacing.md }]}>Notes</Text>
-            <TextInput value={form.notes} onChangeText={(v) => set('notes', v)}
-              style={multilineStyle} multiline
-              placeholder="Arrive 45 min early, snack duty: Miller"
-              placeholderTextColor="#A0A8B8" />
-
-            <View style={[styles.row, { marginTop: spacing.md }]}>
-              {editingId && (
-                <Pressable onPress={() => { setEditingId(null); setForm(blank); }}
-                  style={[styles.cta, styles.ctaGhost]}>
-                  <Text style={[styles.ctaText, { color: colors.pencil }]}>CANCEL</Text>
-                </Pressable>
-              )}
-              <Pressable onPress={save} disabled={busy} style={[styles.cta, styles.flex]}>
-                {busy ? <ActivityIndicator color="#FFF" />
-                      : <Text style={styles.ctaText}>{editingId ? 'SAVE' : 'ADD & NEXT'}</Text>}
-              </Pressable>
-            </View>
-          </View>
-
-          {games.length === 0 && <Text style={styles.empty}>No games yet.</Text>}
-
-          {games.map((g) => {
-            const open = expanded === g.id;
-            return (
-              <Pressable key={g.id} onPress={() => setExpanded(open ? null : g.id)}
-                style={[styles.card, g.status === 'live' && styles.cardLive]}>
-                <View style={styles.cardTop}>
-                  <View style={styles.flex}>
-                    <Text style={styles.opponent}>
-                      {g.homeOrAway === 'home' ? 'vs' : '@'} {g.opponent}
-                    </Text>
-                    <Text style={styles.meta}>
-                      {[formatDate(g.date), formatTimeOf(g.date), g.park,
-                        g.field ? `Field ${g.field}` : null]
-                        .filter(Boolean).join(' · ') || 'No details yet'}
-                    </Text>
-                  </View>
-                  <StatusPill game={g} />
-                </View>
-
-                {open && (
-                  <View style={styles.cardBody}>
-                    {g.notes ? <Text style={styles.notes}>{g.notes}</Text> : null}
-                    <View style={styles.cardBtns}>
-                      {g.status !== 'live' && g.status !== 'final' && (
-                        <Pressable onPress={() => setStatus(g, 'live')} style={styles.smallBtn}>
-                          <Text style={styles.smallBtnText}>START GAME</Text>
-                        </Pressable>
-                      )}
-                      {g.status === 'live' && (
-                        <Pressable onPress={() => setStatus(g, 'final')} style={styles.smallBtn}>
-                          <Text style={styles.smallBtnText}>END GAME</Text>
-                        </Pressable>
-                      )}
-                      <Pressable onPress={() => beginEdit(g)} style={[styles.smallBtn, styles.smallGhost]}>
-                        <Text style={[styles.smallBtnText, { color: colors.pencil }]}>EDIT</Text>
-                      </Pressable>
-                      <Pressable onPress={() => remove(g)} style={[styles.smallBtn, styles.smallGhost]}>
-                        <Text style={[styles.smallBtnText, { color: colors.out }]}>DELETE</Text>
-                      </Pressable>
-                    </View>
-                  </View>
-                )}
-              </Pressable>
-            );
-          })}
+          {games.map((g) => (
+            <GameRow
+              key={g.id}
+              game={g}
+              team={team}
+              roster={roster}
+              expanded={expandedId === g.id}
+              onToggle={() => setExpandedId(expandedId === g.id ? null : g.id)}
+              onRemove={() => remove(g)}
+              onStatus={(s) => setStatus(g, s)}
+            />
+          ))}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
+function AddGameForm({ team, rules, onDone }) {
+  const [form, setForm] = useState(emptyForm());
+  const [busy, setBusy] = useState(false);
+  const [added, setAdded] = useState(0);
+  const opponentRef = useRef(null);
+
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const save = useCallback(async () => {
+    if (form.type === EVENT_TYPES.GAME && !form.opponent.trim()) {
+      notify('Who are you playing?'); return;
+    }
+    if (form.type !== EVENT_TYPES.GAME && !form.title.trim()
+        && form.type === EVENT_TYPES.MISC) {
+      notify('Give the event a title.'); return;
+    }
+    setBusy(true);
+    try {
+      await createEvent(team.id, {
+        type: form.type,
+        title: form.title,
+        opponent: form.opponent,
+        homeOrAway: form.homeOrAway,
+        date: combineDateTime(form.dateStr, form.timeStr),
+        park: form.park,
+        field: form.field,
+        notes: form.notes,
+      }, rules);
+      // Keep type, date, park and home/away — a season at the same field means
+      // usually only the opponent or title changes.
+      setForm((f) => ({ ...f, opponent: '', title: '', notes: '' }));
+      setAdded((n) => n + 1);
+      setTimeout(() => opponentRef.current?.focus(), 60);
+    } catch (e) { notify('Could not save', e.message); }
+    setBusy(false);
+  }, [form, team.id, rules]);
+
+  return (
+    <View style={styles.form}>
+      <Text style={styles.formTitle}>
+        Add to schedule{added > 0 ? ` · ${added} added` : ''}
+      </Text>
+
+      <View style={styles.typeRow}>
+        {EVENT_ORDER.map(([k, l]) => (
+          <Pressable key={k} onPress={() => set('type', k)}
+            style={[styles.typeChip, form.type === k && styles.typeChipOn]}>
+            <Text style={[styles.typeText, form.type === k && styles.typeTextOn]}>{l}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <GameFields form={form} set={set} opponentRef={opponentRef} />
+      <View style={styles.formBtns}>
+        <Pressable onPress={onDone} style={[styles.cta, styles.ctaGhost]}>
+          <Text style={[styles.ctaText, { color: colors.pencil }]}>DONE</Text>
+        </Pressable>
+        <Pressable onPress={save} disabled={busy} style={[styles.cta, styles.flex]}>
+          {busy ? <ActivityIndicator color="#FFF" /> : <Text style={styles.ctaText}>ADD & NEXT</Text>}
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function GameRow({ game, team, roster, expanded, onToggle, onRemove, onStatus }) {
+  const [editing, setEditing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState(emptyForm());
+
+  useEffect(() => {
+    if (!expanded) { setEditing(false); return; }
+    const d = game.date?.toDate?.() ?? (game.date ? new Date(game.date) : null);
+    const { dateStr, timeStr } = splitDateTime(d);
+    setForm({
+      type: typeOf(game),
+      title: game.title || '',
+      opponent: game.opponent || '', homeOrAway: game.homeOrAway || 'home',
+      dateStr, timeStr,
+      park: game.park || '', field: game.field || '', notes: game.notes || '',
+    });
+  }, [expanded, game.id]);
+
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      await updateEvent(team.id, game.id, {
+        type: form.type,
+        title: form.title.trim() || null,
+        opponent: form.type === EVENT_TYPES.GAME ? (form.opponent.trim() || null) : null,
+        homeOrAway: form.type === EVENT_TYPES.GAME ? form.homeOrAway : null,
+        date: combineDateTime(form.dateStr, form.timeStr),
+        park: form.park.trim() || null,
+        field: form.field.trim() || null,
+        notes: form.notes.trim() || null,
+      });
+      setEditing(false);
+    } catch (e) { notify('Could not save', e.message); }
+    setBusy(false);
+  };
+
+  const isFinal = isGame(game) && (game.status === 'final' || game.status === 'amended');
+
+  return (
+    <View style={[styles.card, game.status === 'live' && styles.cardLive,
+                  expanded && styles.cardExpanded]}>
+      <Pressable onPress={onToggle} style={styles.cardHead}>
+        <View style={styles.flex}>
+          <View style={styles.titleRow}>
+            {!isGame(game) && (
+              <View style={styles.typeTag}>
+                <Text style={styles.typeTagText}>
+                  {typeOf(game) === EVENT_TYPES.PRACTICE ? 'PRACTICE' : 'EVENT'}
+                </Text>
+              </View>
+            )}
+            <Text style={styles.opponent} numberOfLines={1}>
+              {eventTitle(game, team.name)}
+            </Text>
+          </View>
+          <Text style={styles.meta}>
+            {[formatDate(game.date), formatTimeOf(game.date), game.park,
+              game.field ? `Field ${game.field}` : null].filter(Boolean).join(' · ')
+              || 'No details yet'}
+          </Text>
+        </View>
+        {isGame(game) ? <StatusPill game={game} /> : null}
+        <Text style={styles.chev}>{expanded ? '⌃' : '⌄'}</Text>
+      </Pressable>
+
+      {expanded && (
+        <View style={styles.cardBody}>
+          {editing ? (
+            <>
+              <GameFields form={form} set={set} />
+              <View style={styles.formBtns}>
+                <Pressable onPress={() => setEditing(false)} style={[styles.cta, styles.ctaGhost]}>
+                  <Text style={[styles.ctaText, { color: colors.pencil }]}>CANCEL</Text>
+                </Pressable>
+                <Pressable onPress={save} disabled={busy} style={[styles.cta, styles.flex]}>
+                  {busy ? <ActivityIndicator color="#FFF" /> : <Text style={styles.ctaText}>SAVE</Text>}
+                </Pressable>
+              </View>
+            </>
+          ) : (
+            <>
+              {isFinal && isGame(game) && (
+                <View style={styles.finalBox}>
+                  <FinalLineScore
+                    game={game}
+                    ourName={team.name}
+                  />
+                  {game.actualStartAt && (
+                    <Text style={styles.finalMeta}>
+                      First pitch {formatTimeOf(game.actualStartAt)}
+                    </Text>
+                  )}
+                </View>
+              )}
+              {game.notes ? <Text style={styles.notes}>{game.notes}</Text> : null}
+
+              <RsvpRow teamId={team.id} eventId={game.id} roster={roster} />
+
+              <View style={[styles.cardBtns, { marginTop: spacing.md }]}>
+                {isGame(game) && game.status === 'scheduled' && (
+                  <Pressable onPress={() => onStatus('live')} style={styles.smallBtn}>
+                    <Text style={styles.smallBtnText}>START GAME</Text>
+                  </Pressable>
+                )}
+                {isGame(game) && game.status === 'live' && (
+                  <Pressable onPress={() => onStatus('final')} style={styles.smallBtn}>
+                    <Text style={styles.smallBtnText}>END GAME</Text>
+                  </Pressable>
+                )}
+                {/* A finished game's details are part of its record — editing
+                    the date or opponent after the fact would rewrite history. */}
+                {!isFinal && (
+                  <Pressable onPress={() => setEditing(true)} style={[styles.smallBtn, styles.smallGhost]}>
+                    <Text style={[styles.smallBtnText, { color: colors.pencil }]}>EDIT</Text>
+                  </Pressable>
+                )}
+                <Pressable onPress={onRemove} style={[styles.smallBtn, styles.smallGhost]}>
+                  <Text style={[styles.smallBtnText, { color: colors.out }]}>DELETE</Text>
+                </Pressable>
+              </View>
+            </>
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
+function GameFields({ form, set, opponentRef }) {
+  const show = fieldsFor(form.type);
+  return (
+    <>
+      {show.title && (
+        <>
+          <Text style={styles.label}>
+            {form.type === EVENT_TYPES.PRACTICE ? 'Title' : 'Title *'}
+          </Text>
+          <TextInput value={form.title} onChangeText={(v) => set('title', v)}
+            style={inputStyle}
+            placeholder={form.type === EVENT_TYPES.PRACTICE ? 'Batting practice' : 'Team photos'}
+            placeholderTextColor="#A0A8B8" autoCapitalize="sentences" />
+          <View style={{ height: spacing.md }} />
+        </>
+      )}
+
+      {show.opponent && (
+        <>
+          <Text style={styles.label}>Opponent *</Text>
+          <TextInput ref={opponentRef} value={form.opponent}
+            onChangeText={(v) => set('opponent', v)}
+            style={inputStyle} placeholder="Northgate" placeholderTextColor="#A0A8B8"
+            autoCapitalize="words" />
+        </>
+      )}
+
+      {show.homeAway && (
+        <View style={[styles.chips, { marginTop: spacing.md }]}>
+          {[['home', 'Home'], ['away', 'Away']].map(([k, l]) => (
+            <Pressable key={k} onPress={() => set('homeOrAway', k)}
+              style={[styles.chip, form.homeOrAway === k && styles.chipOn]}>
+              <Text style={[styles.chipText, form.homeOrAway === k && styles.chipTextOn]}>{l}</Text>
+            </Pressable>
+          ))}
+        </View>
+      )}
+
+      <View style={styles.row}>
+        <DateField label="Date" value={form.dateStr} onChange={(v) => set('dateStr', v)} />
+        <TimeField label="Time" value={form.timeStr} onChange={(v) => set('timeStr', v)} />
+      </View>
+
+      <View style={[styles.row, { marginTop: spacing.md }]}>
+        <View style={styles.flex}>
+          <Text style={styles.label}>
+            {form.type === EVENT_TYPES.MISC ? 'Location' : 'Park'}
+          </Text>
+          <TextInput value={form.park} onChangeText={(v) => set('park', v)}
+            style={inputStyle} placeholder="Rowlett Creek" placeholderTextColor="#A0A8B8"
+            autoCapitalize="words" />
+        </View>
+        {show.field && (
+          <View style={{ width: 88 }}>
+            <Text style={styles.label}>Field</Text>
+            <TextInput value={form.field} onChangeText={(v) => set('field', v)}
+              style={inputStyle} placeholder="4" placeholderTextColor="#A0A8B8" />
+          </View>
+        )}
+      </View>
+
+      <Text style={[styles.label, { marginTop: spacing.md }]}>Notes</Text>
+      <TextInput value={form.notes} onChangeText={(v) => set('notes', v)}
+        style={multilineStyle} multiline
+        placeholder="Arrive 45 min early · snack duty: Miller"
+        placeholderTextColor="#A0A8B8" />
+    </>
+  );
+}
+
+/**
+ * A bare "3–8" doesn't say who won. The result is what a parent is scanning
+ * for, so it leads.
+ */
+export function gameResult(game) {
+  if (game.status !== 'final' && game.status !== 'amended') return null;
+  const home = game.score?.home ?? 0;
+  const away = game.score?.away ?? 0;
+  const ours = game.homeOrAway === 'home' ? home : away;
+  const theirs = game.homeOrAway === 'home' ? away : home;
+  return {
+    outcome: ours > theirs ? 'W' : ours < theirs ? 'L' : 'T',
+    ours, theirs,
+  };
+}
+
 function StatusPill({ game }) {
   if (game.status === 'live') {
     return <View style={[styles.pill, styles.pillLive]}><Text style={styles.pillTextLive}>LIVE</Text></View>;
   }
-  if (game.status === 'final' || game.status === 'amended') {
+  const result = gameResult(game);
+  if (result) {
     return (
-      <View style={styles.pill}>
-        <Text style={styles.pillText}>
-          {(game.score?.away ?? 0)}–{(game.score?.home ?? 0)}
+      <View style={[styles.pill,
+                    result.outcome === 'W' && styles.pillWin,
+                    result.outcome === 'L' && styles.pillLoss]}>
+        <Text style={[styles.pillText,
+                      result.outcome === 'W' && styles.pillTextWin,
+                      result.outcome === 'L' && styles.pillTextLoss]}>
+          {result.outcome} {result.ours}–{result.theirs}
         </Text>
       </View>
     );
@@ -237,37 +410,7 @@ function StatusPill({ game }) {
   return <View style={styles.pill}><Text style={styles.pillText}>SCHEDULED</Text></View>;
 }
 
-/**
- * Free-text date and time. A native picker is four taps for something a coach
- * copying from a league sheet can type in three seconds; anything unparseable
- * just becomes "today", which is recoverable.
- */
-function parseWhen(dateStr, timeStr) {
-  const now = new Date();
-  let month = now.getMonth(), day = now.getDate(), year = now.getFullYear();
-
-  const dm = String(dateStr).match(/(\d{1,2})\s*[\/\-]\s*(\d{1,2})(?:\s*[\/\-]\s*(\d{2,4}))?/);
-  if (dm) {
-    month = parseInt(dm[1], 10) - 1;
-    day = parseInt(dm[2], 10);
-    if (dm[3]) { const y = parseInt(dm[3], 10); year = y < 100 ? 2000 + y : y; }
-  }
-
-  let hours = 12, minutes = 0;
-  const tm = String(timeStr).match(/(\d{1,2})(?::(\d{2}))?\s*(a|p)?/i);
-  if (tm) {
-    hours = parseInt(tm[1], 10);
-    minutes = tm[2] ? parseInt(tm[2], 10) : 0;
-    const ap = (tm[3] || '').toLowerCase();
-    if (ap === 'p' && hours < 12) hours += 12;
-    if (ap === 'a' && hours === 12) hours = 0;
-    if (!ap && hours < 8) hours += 12;   // "5:30" at a ballpark means evening
-  }
-  return new Date(year, month, day, hours, minutes);
-}
-
 const toDate = (d) => d?.toDate?.() ?? (d ? new Date(d) : null);
-
 function formatDate(d) {
   const date = toDate(d);
   if (!date || isNaN(date)) return null;
@@ -276,9 +419,6 @@ function formatDate(d) {
 function formatTimeOf(d) {
   const date = toDate(d);
   if (!date || isNaN(date)) return null;
-  return formatTime(date);
-}
-function formatTime(date) {
   return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
@@ -290,11 +430,15 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.chalk },
   flex: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chalk, padding: spacing.xl },
-  header: { backgroundColor: colors.navy, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
+  header: { backgroundColor: colors.navy, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   h1: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 18, color: '#FFF' },
   h2: { ...text.body, fontSize: 12, color: '#A8B0C6', marginTop: 2 },
+  headerBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.md, backgroundColor: 'rgba(255,255,255,0.14)' },
+  headerBtnOn: { backgroundColor: colors.gold },
+  headerBtnText: { ...text.buttonSecondary, fontSize: 11, color: '#FFF', letterSpacing: 0.8 },
+  headerBtnTextOn: { color: colors.navy },
   scroll: { padding: spacing.md, paddingBottom: 40 },
-  form: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md, ...shadow.card },
+  form: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.primary, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md, ...shadow.card },
   formTitle: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 15, color: colors.navy, marginBottom: spacing.md },
   label: { ...text.label, color: colors.pencil, marginBottom: 5 },
   row: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
@@ -303,24 +447,47 @@ const styles = StyleSheet.create({
   chipOn: { backgroundColor: colors.navy, borderColor: colors.navy },
   chipText: { ...text.bodyStrong, fontSize: 12.5, color: colors.pencil },
   chipTextOn: { color: '#FFF' },
+  formBtns: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
   cta: { height: 46, borderRadius: radius.md, backgroundColor: colors.navy, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18 },
   ctaGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.line },
   ctaText: { ...text.buttonSecondary, color: '#FFF', letterSpacing: 0.8 },
-  card: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm, ...shadow.card },
+  card: { backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line, borderRadius: radius.md, marginBottom: spacing.sm, ...shadow.card },
   cardLive: { borderColor: colors.out, borderWidth: 1.5 },
-  cardTop: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  cardBody: { marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.line },
-  cardBtns: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
-  opponent: { fontFamily: 'Archivo', fontWeight: '700', fontSize: 15, color: colors.navy },
+  cardExpanded: { borderColor: colors.primary },
+  cardHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md },
+  cardBody: { paddingHorizontal: spacing.md, paddingBottom: spacing.md, borderTopWidth: 1, borderTopColor: colors.line, paddingTop: spacing.md },
+  cardBtns: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  opponent: { fontFamily: 'Archivo', fontWeight: '700', fontSize: 15, color: colors.navy, flexShrink: 1 },
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  typeTag: {
+    paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4,
+    backgroundColor: '#E9EDF3',
+  },
+  typeTagText: { ...text.label, fontSize: 7.5, color: colors.pencil },
+  typeRow: { flexDirection: 'row', gap: 6, marginBottom: spacing.md },
+  typeChip: {
+    flex: 1, paddingVertical: 10, borderRadius: radius.md, alignItems: 'center',
+    borderWidth: 1, borderColor: colors.line, backgroundColor: '#FDFDFC',
+  },
+  typeChipOn: { backgroundColor: colors.navy, borderColor: colors.navy },
+  typeText: { ...text.bodyStrong, fontSize: 12.5, color: colors.pencil },
+  typeTextOn: { color: '#FFF' },
   meta: { ...text.body, fontSize: 11.5, color: colors.pencil, marginTop: 3, lineHeight: 16 },
   notes: { ...text.body, fontSize: 13, color: colors.navy, marginBottom: spacing.md, lineHeight: 18 },
+  finalBox: { borderRadius: radius.md, marginBottom: spacing.md, overflow: 'hidden' },
+  finalMeta: { ...text.body, fontSize: 11.5, color: colors.pencil, marginTop: 3 },
   pill: { paddingHorizontal: 9, paddingVertical: 5, borderRadius: radius.pill, backgroundColor: '#EEF1F6' },
   pillLive: { backgroundColor: '#FDECEC' },
   pillText: { ...text.buttonSecondary, fontSize: 9.5, color: colors.pencil, letterSpacing: 0.6 },
+  pillWin: { backgroundColor: '#E4F0E7' },
+  pillLoss: { backgroundColor: '#F3E5E5' },
+  pillTextWin: { color: colors.grass },
+  pillTextLoss: { color: colors.out },
   pillTextLive: { ...text.buttonSecondary, fontSize: 9.5, color: colors.out, letterSpacing: 0.6 },
   smallBtn: { paddingHorizontal: 12, paddingVertical: 9, borderRadius: radius.sm, backgroundColor: colors.navy },
   smallGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.line },
   smallBtnText: { ...text.buttonSecondary, fontSize: 10, color: '#FFF', letterSpacing: 0.6 },
+  chev: { fontSize: 16, color: colors.pencil, paddingHorizontal: 2 },
   empty: { ...text.body, color: colors.pencil, textAlign: 'center', paddingVertical: 30 },
   msg: { ...text.body, color: colors.pencil, textAlign: 'center' },
 });

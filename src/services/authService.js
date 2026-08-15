@@ -66,17 +66,34 @@ export const currentUid = () => auth.currentUser?.uid ?? null;
  * and a tablet should get one notification per device — and reinstalling on
  * the phone should replace that entry rather than leave a dead token behind.
  */
+/**
+ * Every failure path returns a reason rather than throwing.
+ *
+ * This used to throw on a missing VAPID key, which meant the "Turn on
+ * notifications" button appeared to do nothing at all: permission was granted,
+ * getToken() rejected, and the rejection went nowhere. The prompt firing but no
+ * notification ever arriving is exactly what that looks like.
+ */
 export async function registerDevice(uid) {
-  // On iOS the site must be on the home screen before push is even offered.
-  // Reported rather than silently failing, so the UI can show instructions.
-  if (requiresInstallFirst()) return { granted: false, needsInstall: true };
-  if (!pushSupported()) return { granted: false, unsupported: true };
+  if (requiresInstallFirst()) return { granted: false, reason: 'needs_install' };
+  if (!pushSupported()) return { granted: false, reason: 'unsupported' };
 
   const granted = await requestPushPermission();
-  if (!granted) return { granted: false };
+  if (!granted) return { granted: false, reason: 'denied' };
 
-  const token = await fetchPushToken();
-  if (!token) return { granted: false };
+  let token;
+  try {
+    token = await fetchPushToken();
+  } catch (e) {
+    const msg = String(e?.message || e);
+    // The most common cause by far, and the least obvious from the error text.
+    if (msg.includes('vapid') || msg.includes('applicationServerKey') || msg.includes('VAPID')) {
+      return { granted: false, reason: 'no_vapid_key', detail: msg };
+    }
+    return { granted: false, reason: 'token_failed', detail: msg };
+  }
+  if (!token) return { granted: false, reason: 'no_vapid_key' };
+
   const id = await deviceId();
 
   await updateDoc(doc(db, 'users', uid), {

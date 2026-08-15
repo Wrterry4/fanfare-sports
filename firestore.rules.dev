@@ -61,9 +61,6 @@ service cloud.firestore {
     function isTeamOwner(teamId) {
       return isMember(teamId) && memberRole(teamId) == 'owner';
     }
-    function canScore(teamId) {
-      return isMember(teamId) && memberRole(teamId) in ['owner', 'coach', 'scorekeeper'];
-    }
     // A fan (grandparent, aunt, family friend) follows one child. They read the
     // game and that child's stats, and stay out of team communication.
     function isFan(teamId) {
@@ -112,12 +109,20 @@ service cloud.firestore {
     function playerData(playerId) {
       return get(/databases/$(database)/documents/players/$(playerId)).data;
     }
+    // authorizedUserIds is maintained by syncPlayerAccess: guardians, approved
+    // followers, and the staff of every rostered team.
     function canSeePlayer(playerId) {
       return signedIn() && uid() in playerData(playerId).authorizedUserIds;
     }
     function isGuardian(playerId) {
       return signedIn() && uid() in playerData(playerId).guardianUserIds;
     }
+    /**
+     * Rules can't iterate, so "staff of any team this player is rostered on"
+     * can't be computed here. It doesn't need to be: authorizedUserIds already
+     * holds exactly that set — guardians plus the staff of every rostered team
+     * — maintained by the syncPlayerAccess Cloud Function.
+     */
 
     match /players/{playerId} {
       allow read:   if canSeePlayer(playerId);
@@ -129,12 +134,15 @@ service cloud.firestore {
       // authorizedUserIds so they can read back what they just wrote.
       allow create: if signedIn()
                     && uid() in request.resource.data.authorizedUserIds;
-      allow update: if isGuardian(playerId)
-                    // All three are function-managed. Editing them here would
-                    // let a user grant access to a child. rosteredTeamIds
-                    // matters because syncPlayerAccess() derives
-                    // authorizedUserIds from it — adding a team id is an
-                    // indirect way to hand that team's staff a child's record.
+      // A guardian OR any staff member of a team this player is rostered on.
+      //
+      // Previously guardians only — but createPlayer() writes an EMPTY
+      // guardianUserIds (a coach adding a kid isn't that kid's parent), so the
+      // coach who just created a player could not then edit them. That's the
+      // "insufficient permissions" error on the roster screen.
+      allow update: if canSeePlayer(playerId)
+                    // Still function-managed: editing these would let someone
+                    // grant themselves or others access to a child.
                     && !request.resource.data.diff(resource.data).affectedKeys()
                          .hasAny(['authorizedUserIds', 'guardianUserIds',
                                   'rosteredTeamIds']);
@@ -175,6 +183,19 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ---- claims ------------------------------------------------------------
+    // "I'm Jack's mum" / "I'm Jack's grandfather". Created and resolved by
+    // Cloud Functions only: approving one grants guardianship, which must
+    // never be self-granted. A join code gets forwarded around, so anything
+    // less would let a stranger attach themselves to a child.
+    match /claims/{claimId} {
+      allow read: if signedIn() && (
+                    resource.data.requestedBy == uid()
+                    || isStaff(resource.data.teamId)
+                  );
+      allow write: if false;
+    }
+
     // ---- transfers -------------------------------------------------------
     // Every roster link is consented by a guardian. A school cannot pull a
     // child's record into its own roster on its own authority.
@@ -200,8 +221,11 @@ service cloud.firestore {
       allow read:   if signedIn();
       // DEV: no createTeam() function available on Spark.
       allow create: if signedIn() && request.resource.data.createdBy == uid();
-      allow update: if isStaff(teamId);
-      allow delete: if isTeamOwner(teamId);
+      allow update: if isStaff(teamId)
+                    // DEV: a team created client-side has no org admin, so the
+                    // creator is treated as its owner for rename and delete.
+                    || resource.data.createdBy == uid();
+      allow delete: if isTeamOwner(teamId) || resource.data.createdBy == uid();
 
       // ---- members -------------------------------------------------------
       match /members/{memberUid} {
@@ -232,17 +256,31 @@ service cloud.firestore {
                       // Only an owner may mint another owner.
                       && (request.resource.data.role != 'owner' || isTeamOwner(teamId))
                       || (
-                        // Anyone may edit their own notification preferences,
-                        // and nothing else.
+                        // Your own notification preferences and display name.
+                        // The name is denormalized here because member lists
+                        // and chat need it, and nobody can read another
+                        // person's user document.
                         uid() == memberUid &&
                         request.resource.data.diff(resource.data).affectedKeys()
-                          .hasOnly(['notificationPrefs'])
+                          .hasOnly(['notificationPrefs', 'displayName'])
                       );
         allow delete: if isStaff(teamId) || uid() == memberUid;
       }
 
       // ---- roster --------------------------------------------------------
       match /roster/{playerId} {
+        // Readable by every member, fans included.
+        //
+        // This document carries first name, last name, jersey number and
+        // position — what's printed on the back of a shirt and written in
+        // every scorebook. A live scoreboard is unusable without it: a parent
+        // watching from the stands would see dashes for every child but their
+        // own.
+        //
+        // The sensitive material is NOT here. Birth year, guardians, and every
+        // statistic live on /players and its subcollections, gated by
+        // canSeePlayer(). That split is the whole point of separating the two
+        // documents.
         allow read:   if isMember(teamId);
         allow create: if isStaff(teamId);
         allow update: if isStaff(teamId)
@@ -259,11 +297,17 @@ service cloud.firestore {
         allow delete: if isStaff(teamId);
 
         allow update: if
-          // The scorekeeper drives live game state.
-          (canScore(teamId) && resource.data.scorekeeperUid == uid())
-          // Any eligible scorer may raise a hand for the book. Requesting is
-          // not taking — only the flag changes.
-          || (canScore(teamId) &&
+          // Whoever holds the book drives live game state.
+          (isMember(teamId) && resource.data.scorekeeperUid == uid())
+          // ANY member may raise a hand for the book — a team parent keeping
+          // score is completely normal in youth ball. Requesting is not
+          // taking; the current holder still has to pass it.
+          //
+          // This was previously limited to canScore() roles, so a parent's
+          // request was rejected by the rules and the optimistic local write
+          // rolled back — which looked like the button flashing "REQUESTED"
+          // and reverting.
+          || (isMember(teamId) &&
               request.resource.data.diff(resource.data).affectedKeys()
                 .hasOnly(['batonRequestedBy']) &&
               request.resource.data.batonRequestedBy == uid())
@@ -277,13 +321,34 @@ service cloud.firestore {
               request.resource.data.diff(resource.data).affectedKeys()
                 .hasOnly(['scorekeeperUid', 'batonRequestedBy', 'batonSeizedAt']));
 
+        // ---- RSVPs -------------------------------------------------------
+        // Keyed by PLAYER, so a coach counting Saturday's turnout counts kids
+        // rather than adults. Staff answer for themselves under a "u_" id.
+        //
+        // Writable by everyone who isn't a fan, but only for a child they're
+        // linked to — or for themselves. Otherwise one parent could mark
+        // another family's child absent.
+        match /rsvps/{rsvpId} {
+          allow read: if isMember(teamId) && !isFan(teamId);
+          allow write: if isMember(teamId) && !isFan(teamId)
+                       && request.resource.data.setBy == uid()
+                       && (
+                         rsvpId == 'u_' + uid()
+                         || rsvpId in member(teamId).data.linkedPlayerIds
+                         || isStaff(teamId)
+                       );
+        }
+
         // ---- event log ---------------------------------------------------
         // Append-only, single writer. Immutable once written: corrections
         // set `voided` through a Cloud Function, which preserves the audit
         // trail and keeps replay deterministic.
         match /events/{eventId} {
           allow read:   if isMember(teamId);
-          allow create: if canScore(teamId)
+          // Holding the baton IS the authorization. A coach decides who keeps
+          // the book by passing it, so a role check on top would only stop a
+          // parent the coach deliberately handed it to.
+          allow create: if isMember(teamId)
                         && gameDoc(teamId, gameId).scorekeeperUid == uid()
                         && request.resource.data.createdBy == uid()
                         && request.resource.data.voided == false;

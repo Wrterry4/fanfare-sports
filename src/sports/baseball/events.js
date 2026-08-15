@@ -20,6 +20,11 @@ export const EV = {
 
   // Pitches
   BALL: 'BALL',
+  // Counts toward the pitcher's total and nothing else. Outcome-only mode
+  // needs a way to keep pitch counts honest (rest-day limits depend on them)
+  // without implying anything about the count — the tally button used to fire
+  // BALL, which walked batters that never walked.
+  PITCH_TALLY: 'PITCH_TALLY',
   STRIKE_SWINGING: 'STRIKE_SWINGING',
   STRIKE_LOOKING: 'STRIKE_LOOKING',
   FOUL: 'FOUL',

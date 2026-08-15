@@ -5,7 +5,7 @@
 
 import {
   SCORING_MODES, CONTROL_GROUPS, getVisibleControls, showsPitchEntry,
-  weArePitching, estimateTaps, tapReduction, MODE_TRADEOFFS,
+  showsPitchTally, weArePitching, estimateTaps, tapReduction, MODE_TRADEOFFS,
 } from '../src/sports/baseball/scoringModes.js';
 import { EV } from '../src/sports/baseball/events.js';
 import { reduce } from '../src/sports/baseball/engine.js';
@@ -41,11 +41,22 @@ out.push('\nControl visibility');
   check('and out buttons',
     casualBatting[CONTROL_GROUPS.OUT].includes(EV.STRIKEOUT), true);
 
+  // Casual mode hides the pitch ROW in both halves — keeping it for one half
+  // made the toggle look broken, since half the game it changed nothing.
   const casualFielding = getVisibleControls(SCORING_MODES.CASUAL, true);
-  check('casual mode KEEPS pitch entry while our pitcher works',
-    !!casualFielding[CONTROL_GROUPS.PITCH], true);
-  check('because rest days depend on the count',
-    showsPitchEntry(SCORING_MODES.CASUAL, true), true);
+  check('casual mode hides pitch entry in both halves',
+    casualFielding[CONTROL_GROUPS.PITCH], undefined);
+  check('the toggle always changes something visible',
+    showsPitchEntry(SCORING_MODES.CASUAL), false);
+
+  // Pitch counts still matter, so a single tally control replaces the row
+  // while our own arm is working.
+  check('a tally control appears while we pitch',
+    showsPitchTally(SCORING_MODES.CASUAL, true), true);
+  check('but not while we bat',
+    showsPitchTally(SCORING_MODES.CASUAL, false), false);
+  check('and never in full mode, where the pitch row covers it',
+    showsPitchTally(SCORING_MODES.FULL, true), false);
 }
 
 out.push('\nTap load');

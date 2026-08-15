@@ -23,6 +23,12 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
+// Without these, a deployed update sits in "waiting" until every tab closes —
+// on an installed PWA that can be days. The old worker keeps control and
+// background pushes go to code that may not match the app.
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+
 messaging.onBackgroundMessage((payload) => {
   const { title, body } = payload.notification || {};
   const data = payload.data || {};

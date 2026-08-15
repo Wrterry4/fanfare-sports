@@ -64,23 +64,33 @@ const BASERUNNING_CONTROLS = [
  * @param weArePitching true when our team is in the field
  */
 export function getVisibleControls(mode, weArePitching) {
-  const showsPitches = mode === SCORING_MODES.FULL || weArePitching;
+  // Casual mode now hides the pitch row in BOTH halves of the inning.
+  //
+  // Previously it kept pitch buttons while our own pitcher worked, so toggling
+  // the mode appeared to do nothing for half the game — it looked like the
+  // button had stopped responding. Pitch counts still matter, so casual mode
+  // swaps the three-button pitch row for a single tally control instead.
+  const showsPitches = mode === SCORING_MODES.FULL;
   const groups = {
     [CONTROL_GROUPS.ON_BASE]: ON_BASE_CONTROLS,
     [CONTROL_GROUPS.OUT]: showsPitches ? OUT_CONTROLS_FULL : OUT_CONTROLS,
     [CONTROL_GROUPS.BASERUNNING]: BASERUNNING_CONTROLS,
   };
 
-  // Pitch entry survives casual mode whenever our arm is on the mound,
-  // because rest-day limits depend on an accurate count and no other data
-  // source can reconstruct it.
   if (showsPitches) groups[CONTROL_GROUPS.PITCH] = PITCH_CONTROLS;
 
   return groups;
 }
 
-export const showsPitchEntry = (mode, weArePitching) =>
-  mode === SCORING_MODES.FULL || weArePitching;
+export const showsPitchEntry = (mode) => mode === SCORING_MODES.FULL;
+
+/**
+ * In casual mode, a single tally button keeps the pitch count honest while our
+ * pitcher works — rest-day limits depend on it and nothing else can
+ * reconstruct it after the fact.
+ */
+export const showsPitchTally = (mode, weArePitching) =>
+  mode === SCORING_MODES.CASUAL && weArePitching;
 
 /**
  * True when our team is in the field, given the half-inning and which dugout

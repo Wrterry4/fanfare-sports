@@ -13,7 +13,7 @@
  */
 
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
-import { observeAuth, watchTokenRefresh } from '../services/authService.js';
+import { observeAuth, watchTokenRefresh, registerDevice } from '../services/authService.js';
 import { resolvePendingInvite } from '../navigation/linking.js';
 import { redeemInvite, postRedeemDestination } from '../services/inviteService.js';
 
@@ -35,6 +35,13 @@ export function AuthProvider({ children }) {
       if (!u) { inviteHandled.current = false; return; }
 
       tokenWatcher.current = watchTokenRefresh(u.uid);
+
+      // Re-register silently when permission is already granted. FCM rotates
+      // tokens, and a reinstall issues a new one — without this, notifications
+      // quietly stop and nobody knows why.
+      const alreadyGranted =
+        typeof Notification !== 'undefined' && Notification.permission === 'granted';
+      if (alreadyGranted) registerDevice(u.uid).catch(() => {});
 
       if (!inviteHandled.current) {
         inviteHandled.current = true;

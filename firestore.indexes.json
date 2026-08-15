@@ -5,9 +5,18 @@
       "collectionGroup": "transfers",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "playerId", "order": "ASCENDING" },
-        { "fieldPath": "toTeamId", "order": "ASCENDING" },
-        { "fieldPath": "status", "order": "ASCENDING" }
+        {
+          "fieldPath": "playerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "toTeamId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
@@ -15,9 +24,18 @@
       "collectionGroup": "transfers",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "playerId", "order": "ASCENDING" },
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "createdAt", "order": "DESCENDING" }
+        {
+          "fieldPath": "playerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        }
       ]
     },
     {
@@ -25,8 +43,14 @@
       "collectionGroup": "invites",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "teamId", "order": "ASCENDING" },
-        { "fieldPath": "type", "order": "ASCENDING" }
+        {
+          "fieldPath": "teamId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
@@ -34,8 +58,14 @@
       "collectionGroup": "members",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "linkedPlayerIds", "arrayConfig": "CONTAINS" },
-        { "fieldPath": "role", "order": "ASCENDING" }
+        {
+          "fieldPath": "linkedPlayerIds",
+          "arrayConfig": "CONTAINS"
+        },
+        {
+          "fieldPath": "role",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
@@ -43,8 +73,14 @@
       "collectionGroup": "games",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "date", "order": "ASCENDING" }
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "date",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
@@ -52,8 +88,63 @@
       "collectionGroup": "pitchingAppearances",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
-        { "fieldPath": "date", "order": "DESCENDING" },
-        { "fieldPath": "eligibleAgain", "order": "ASCENDING" }
+        {
+          "fieldPath": "date",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "eligibleAgain",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "//": "Settings: pending claims a coach needs to approve",
+      "collectionGroup": "claims",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "teamId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "//": "Roster: my own outstanding claim requests",
+      "collectionGroup": "claims",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "requestedBy",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "//": "claimPlayer duplicate check",
+      "collectionGroup": "claims",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "playerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "requestedBy",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        }
       ]
     }
   ],

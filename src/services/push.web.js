@@ -54,8 +54,19 @@ export async function requestPushPermission() {
 
 export async function fetchPushToken() {
   const m = await messaging();
-  if (!m) return null;
-  const registration = await navigator.serviceWorker.ready;
+  if (!m) throw new Error('This browser cannot receive push messages.');
+  if (!VAPID_KEY) {
+    // Without this the SDK throws something opaque about applicationServerKey.
+    throw new Error(
+      'No VAPID key. Set EXPO_PUBLIC_FIREBASE_VAPID_KEY in .env — Firebase ' +
+      'Console → Project settings → Cloud Messaging → Web Push certificates.'
+    );
+  }
+  // Must be OUR service worker: the FCM SDK will happily register its own at a
+  // different scope and then listen on the wrong one.
+  const registration =
+    await navigator.serviceWorker.getRegistration('/firebase-messaging-sw.js')
+    ?? await navigator.serviceWorker.ready;
   return getToken(m, { vapidKey: VAPID_KEY, serviceWorkerRegistration: registration });
 }
 

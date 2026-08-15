@@ -343,6 +343,28 @@ section('Reverse batting order each inning (t-ball)');
   check('normal order is preserved', s.lineups.away[0].playerId, 'a1');
 }
 
+
+// ===========================================================================
+section('Pitch tally (outcome-only mode)');
+// ===========================================================================
+{
+  seq = 0;
+  const e = [...newGame(),
+    ev(EV.PITCH_TALLY), ev(EV.PITCH_TALLY), ev(EV.PITCH_TALLY),
+    ev(EV.PITCH_TALLY), ev(EV.PITCH_TALLY), ev(EV.PITCH_TALLY),
+  ];
+  const s = reduce(e, UNCAPPED, config);
+  const st = computeStats(e, UNCAPPED, config);
+  check('six tallies count six pitches', s.pitchCounts['h1'], 6);
+  // The bug this replaced: the tally fired BALL, so six taps walked a batter
+  // and put a runner on first.
+  check('the ball count is untouched', s.balls, 0);
+  check('nobody walked', s.bases[1], null);
+  check('the batter has not changed', s.batterId, 'a1');
+  check('and no balls are charged to the pitcher', st.pitching['h1'].balls, 0);
+  check('but the pitch total is right', st.pitching['h1'].pitches, 6);
+}
+
 // --- Report ----------------------------------------------------------------
 console.log(results.join('\n'));
 console.log(`\n${passed} passed, ${failed} failed`);

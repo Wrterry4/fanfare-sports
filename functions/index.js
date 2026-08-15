@@ -202,6 +202,9 @@ export const syncPlayerAccess = onDocumentWritten('players/{playerId}', async (e
   if (!after) return;
 
   const guardians = after.guardianUserIds || [];
+  // Approved fans — grandparents and family — read one specific child without
+  // being staff or a guardian, so they have to be listed explicitly.
+  const followers = after.followerUserIds || [];
   const teams = after.rosteredTeamIds || [];
 
   const staff = new Set();
@@ -211,7 +214,7 @@ export const syncPlayerAccess = onDocumentWritten('players/{playerId}', async (e
     members.forEach((m) => staff.add(m.id));
   }
 
-  const next = [...new Set([...guardians, ...staff])].sort();
+  const next = [...new Set([...guardians, ...followers, ...staff])].sort();
   const current = [...(after.authorizedUserIds || [])].sort();
   if (JSON.stringify(next) === JSON.stringify(current)) return;
 
@@ -365,83 +368,6 @@ async function recomputeCareers(playerIds) {
  * opted in get woken up. Notification fatigue is the failure mode that kills
  * this feature by week two.
  */
-export const notifyOnBatterUp = onDocumentCreated(
-  'teams/{teamId}/games/{gameId}/events/{eventId}',
-  async (event) => {
-    const data = event.data?.data();
-    if (!data || data.type !== EV.BATTER_UP) return;
-
-    const { teamId } = event.params;
-    const batterId = data.payload?.playerId;
-    if (!batterId) return;
-
-    const onDeckId = data.payload?.onDeckPlayerId;
-
-    await Promise.all([
-      batterId  && pushForPlayer(teamId, batterId, 'myPlayerAtBat', (name) => ({
-        title: `${name} is up`,
-        body: 'At the plate now.',
-      })),
-      onDeckId && pushForPlayer(teamId, onDeckId, 'myPlayerAtBat', (name) => ({
-        title: `${name} is on deck`,
-        body: 'Up next.',
-      })),
-    ].filter(Boolean));
-  }
-);
-
-async function pushForPlayer(teamId, playerId, prefKey, build) {
-  const members = await db.collection(`teams/${teamId}/members`)
-    .where('linkedPlayerIds', 'array-contains', playerId).get();
-
-  const recipients = members.docs.filter((m) => m.data().notificationPrefs?.[prefKey]);
-  if (!recipients.length) return;
-
-  const playerSnap = await db.doc(`players/${playerId}`).get();
-  const name = playerSnap.data()?.firstName || 'Your player';
-  const { title, body } = build(name);
-
-  const tokens = [];
-  for (const m of recipients) {
-    const userSnap = await db.doc(`users/${m.id}`).get();
-    const pushTokens = userSnap.data()?.pushTokens || {};
-    for (const t of Object.values(pushTokens)) if (t.token) tokens.push(t.token);
-  }
-  if (!tokens.length) return;
-
-  const res = await getMessaging().sendEachForMulticast({
-    tokens,
-    notification: { title, body },
-    data: { type: 'atBat', teamId, playerId },
-    apns: { payload: { aps: { sound: 'default', 'interruption-level': 'time-sensitive' } } },
-    android: { priority: 'high' },
-  });
-
-  // Dead tokens accumulate fast across reinstalls; prune as we go.
-  await pruneDeadTokens(recipients, tokens, res);
-}
-
-async function pruneDeadTokens(recipients, tokens, res) {
-  const dead = new Set();
-  res.responses.forEach((r, i) => {
-    const code = r.error?.code;
-    if (code === 'messaging/registration-token-not-registered' ||
-        code === 'messaging/invalid-registration-token') dead.add(tokens[i]);
-  });
-  if (!dead.size) return;
-
-  for (const m of recipients) {
-    const userRef = db.doc(`users/${m.id}`);
-    const snap = await userRef.get();
-    const pushTokens = snap.data()?.pushTokens || {};
-    const updates = {};
-    for (const [deviceId, t] of Object.entries(pushTokens)) {
-      if (dead.has(t.token)) updates[`pushTokens.${deviceId}`] = FieldValue.delete();
-    }
-    if (Object.keys(updates).length) await userRef.update(updates);
-  }
-}
-
 async function notifyGuardians(playerId, { title, body, data }) {
   const playerSnap = await db.doc(`players/${playerId}`).get();
   const guardians = playerSnap.data()?.guardianUserIds || [];
@@ -461,6 +387,14 @@ async function notifyGuardians(playerId, { title, body, data }) {
 // this single entry point.
 // ---------------------------------------------------------------------------
 export { createTeam, transferTeamOwnership } from './teams.js';
+export {
+  requestPlayerClaim, resolvePlayerClaim, assignGuardian,
+  propagateDisplayName, propagatePlayerName,
+} from './claims.js';
+export {
+  notifyTeamMessage, notifyDirectMessage, notifyGameStatus, notifyScoringPlay,
+  sendTestNotification,
+} from './notifications.js';
 export {
   createPlayerInvites, createFanInvite, createTeamInvite,
   revokeInvite, previewInvite, redeemInvite, invitePipeline,

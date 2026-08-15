@@ -12,18 +12,20 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import {
-  db, doc, collection, query, where, orderBy, limit, onSnapshot, getDoc,
+  db, doc, collection, query, where, orderBy, limit, onSnapshot, getDoc, setDoc,
 } from '../services/firebase';
-import { useTeams } from './useTeams.js';
+import { useActiveTeam } from './ActiveTeam.jsx';
 import { buildGameConfig } from '../sports/baseball/config.js';
+import { isGame } from '../shared/eventTypes.js';
 import { RULE_PRESETS, DEFAULT_RULES } from '../sports/baseball/rules.js';
 
 export function useGameDay() {
-  const { teams, loading: teamsLoading } = useTeams();
-  const team = teams?.[0] ?? null;        // multi-team switching comes later
+  // Selected in the account menu; persists across launches.
+  const { team, loading: teamsLoading } = useActiveTeam();
 
   const [game, setGame] = useState(null);
   const [allGames, setAllGames] = useState([]);
+  const [allEvents, setAllEvents] = useState([]);
   const [gameLoading, setGameLoading] = useState(true);
   const [roster, setRoster] = useState([]);
   const [error, setError] = useState(null);
@@ -44,7 +46,10 @@ export function useGameDay() {
 
     return onSnapshot(q,
       (snap) => {
-        const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const everything = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        // Practices and team events share this collection but are never
+        // scored, so Game Day and the lineup picker only ever see games.
+        const all = everything.filter(isGame);
         // A live game always wins. Otherwise the next scheduled one, so the
         // screen shows what's coming rather than something from March.
         const now = Date.now();
@@ -57,6 +62,7 @@ export function useGameDay() {
                     ?? null;
         setGame(active);
         setAllGames(all);
+        setAllEvents(everything);
         setGameLoading(false);
       },
       (e) => { setError(e); setGameLoading(false); });
@@ -68,18 +74,31 @@ export function useGameDay() {
 
     return onSnapshot(collection(db, 'teams', team.id, 'roster'), async (snap) => {
       try {
-        const rows = await Promise.all(snap.docs.map(async (r) => {
-          const p = await getDoc(doc(db, 'players', r.id)).catch(() => null);
-          if (!p?.exists?.()) return null;
-          return {
-            playerId: r.id,
-            ...p.data(),
-            ...r.data(),       // roster fields (jersey, position) win
-          };
+        // The roster document is the source for identity — name, number,
+        // position — and every member can read it.
+        //
+        // It used to join to /players for names, which a parent can only read
+        // for their OWN child. Every other row came back null and was dropped,
+        // so the roster was nearly empty and the scoreboard fell back to raw
+        // document ids. That was the "jumbled characters".
+        const rows = snap.docs.map((r) => ({ playerId: r.id, ...r.data() }));
+
+        // Older rosters predate the denormalized name. Anyone who can read
+        // /players fills the gap in, which repairs the data in place rather
+        // than needing a migration.
+        await Promise.all(rows.map(async (row) => {
+          if (row.firstName) return;
+          const p = await getDoc(doc(db, 'players', row.playerId)).catch(() => null);
+          if (!p?.exists?.()) return;
+          row.firstName = p.data().firstName;
+          row.lastName = p.data().lastName;
+          setDoc(doc(db, 'teams', team.id, 'roster', row.playerId), {
+            firstName: p.data().firstName ?? null,
+            lastName: p.data().lastName ?? null,
+          }, { merge: true }).catch(() => {});
         }));
-        setRoster(rows.filter(Boolean).sort(
-          (a, b) => (a.jerseyNumber ?? 999) - (b.jerseyNumber ?? 999)
-        ));
+
+        setRoster(rows.sort((a, b) => (a.jerseyNumber ?? 999) - (b.jerseyNumber ?? 999)));
       } catch (e) { setError(e); }
     }, (e) => setError(e));
   }, [team?.id]);
@@ -103,14 +122,23 @@ export function useGameDay() {
     return buildGameConfig({ ...game, lineup });
   }, [game, roster]);
 
-  const names = useMemo(() => Object.fromEntries(
-    roster.map((p) => [p.playerId, `${p.firstName} ${p.lastName}`.trim()])
-  ), [roster]);
+  const names = useMemo(() => {
+    const map = Object.fromEntries(
+      roster.map((p) => [p.playerId, `${p.firstName} ${p.lastName}`.trim()])
+    );
+    // The other dugout is anonymous slots, but they still appear as the batter,
+    // on deck, and in the hole. Numbering them 1-9 beats showing a raw
+    // placeholder id.
+    for (let i = 1; i <= 12; i++) map[`opp_${i}`] = `Batter ${i}`;
+    map.opp_p = 'Opponent';
+    return map;
+  }, [roster]);
 
   return {
     team,
     game,
     allGames,
+    allEvents,
     roster,
     rules,
     config,

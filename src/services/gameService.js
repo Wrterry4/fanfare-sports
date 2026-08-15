@@ -28,6 +28,7 @@ import { httpsCallable } from './firebase';
 import { db, functions } from './firebase';
 import { reduce } from '../sports/baseball/engine.js';
 import { computeStats } from '../sports/baseball/stats.js';
+import { shouldSyncSummary } from '../shared/gameSummary.js';
 
 const gamePath   = (teamId, gameId) => doc(db, 'teams', teamId, 'games', gameId);
 const eventsPath = (teamId, gameId) => collection(db, 'teams', teamId, 'games', gameId, 'events');
@@ -126,13 +127,24 @@ export function appendEvent(teamId, gameId, sequencer, uid, type, payload = {}) 
  * Mirror the derived summary onto the game doc so schedule and list views can
  * render without loading a full event log. Debounced by the caller.
  */
+/**
+ * Mirror the derived summary onto the game document so list views can render
+ * without loading an event log.
+ *
+ * Deliberately does NOT write `status`. Every status transition is an explicit
+ * act — Start on Game Day or Schedule, End Game, or finalize — and a
+ * background mirror has no business making one.
+ */
 export function syncGameSummary(teamId, gameId, state) {
   return updateDoc(gamePath(teamId, gameId), {
     score: state.score,
     currentInning: state.inning,
     isTopInning: state.isTop,
     outs: state.outs,
-    status: state.status === 'final' ? 'final' : 'live',
+    // Mirrored so the Schedule tab can render a finished game's inning-by-
+    // inning report without loading its whole event log.
+    lineScore: state.lineScore,
+    errors: state.errors,
     lastEventAt: serverTimestamp(),
     eventCount: (state.lastEventSeq ?? -1) + 1,
   });
@@ -236,3 +248,6 @@ export async function createGame(teamId, { opponent, date, homeOrAway, rules, cr
   await batch.commit();
   return ref.id;
 }
+
+// Re-exported so callers keep importing game concerns from one place.
+export { shouldSyncSummary };

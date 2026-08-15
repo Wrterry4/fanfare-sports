@@ -59,7 +59,8 @@ export function computeStats(events, rules = DEFAULT_RULES, config = {}) {
     // ---- Pitch-level accounting -----------------------------------------
     if (pitcherBefore) {
       const p = bump(pitching, pitcherBefore, emptyPitching);
-      if (type === EV.BALL) { p.pitches++; p.balls++; }
+      if (type === EV.PITCH_TALLY) { p.pitches++; }
+      else if (type === EV.BALL) { p.pitches++; p.balls++; }
       else if (type === EV.STRIKE_SWINGING || type === EV.STRIKE_LOOKING || type === EV.FOUL) {
         p.pitches++; p.strikes++;
       }

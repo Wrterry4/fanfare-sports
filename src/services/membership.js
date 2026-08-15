@@ -21,8 +21,9 @@
 
 import {
   db, doc, collection, setDoc, getDoc, updateDoc, onSnapshot,
-  serverTimestamp, arrayUnion, arrayRemove,
+  serverTimestamp, arrayUnion, arrayRemove, query, where,
 } from './firebase';
+import { call } from './callable.js';
 import { currentUid } from './authService.js';
 
 export const ROLE_LABELS = {
@@ -51,6 +52,11 @@ export async function joinTeamWithCode({ teamId, code, role = 'parent' }) {
   const uid = currentUid();
   if (!uid) throw new Error('Sign in first.');
 
+  // Carried onto the member doc so team lists and chat can show a name —
+  // nobody can read another person's user document.
+  const me = await getDoc(doc(db, 'users', uid)).catch(() => null);
+  const displayName = me?.data()?.displayName || null;
+
   const teamSnap = await getDoc(doc(db, 'teams', teamId));
   if (!teamSnap.exists()) throw new Error('That team no longer exists.');
 
@@ -61,6 +67,7 @@ export async function joinTeamWithCode({ teamId, code, role = 'parent' }) {
 
   await setDoc(doc(db, 'teams', teamId, 'members', uid), {
     role,
+    displayName,
     joinCode: given,            // the rule compares this field
     linkedPlayerIds: [],
     notificationPrefs: DEFAULT_PREFS,
@@ -94,6 +101,50 @@ export function unlinkPlayerFromMember(teamId, memberUid, playerId) {
 
 export function setMemberRole(teamId, memberUid, role) {
   return updateDoc(doc(db, 'teams', teamId, 'members', memberUid), { role });
+}
+
+// ---------------------------------------------------------------------------
+// Claiming a player
+// ---------------------------------------------------------------------------
+
+/** Ask to be linked to a child. Grants nothing until someone approves. */
+export async function requestPlayerClaim({ teamId, playerId, kind = 'parent', note }) {
+  return call('requestPlayerClaim', {
+    teamId, playerId, kind, note,
+  });
+}
+
+/** Coach-side: link someone on the team to a player. */
+export async function assignGuardian({ teamId, playerId, memberUid, asGuardian }) {
+  return call('assignGuardian', {
+    teamId, playerId, memberUid, asGuardian,
+  });
+}
+
+export async function resolvePlayerClaim(claimId, approve) {
+  return call('resolvePlayerClaim', { claimId, approve });
+}
+
+/** Pending requests a coach needs to act on. */
+export function subscribePendingClaims(teamId, cb) {
+  const q = query(
+    collection(db, 'claims'),
+    where('teamId', '==', teamId),
+    where('status', '==', 'pending')
+  );
+  return onSnapshot(q,
+    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+    () => cb([]));
+}
+
+/** My own outstanding requests, so the UI can say "waiting on a coach". */
+export function subscribeMyClaims(cb) {
+  const uid = currentUid();
+  if (!uid) { cb([]); return () => {}; }
+  const q = query(collection(db, 'claims'), where('requestedBy', '==', uid));
+  return onSnapshot(q,
+    (snap) => cb(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+    () => cb([]));
 }
 
 export function buildJoinUrl(origin, teamId, code) {

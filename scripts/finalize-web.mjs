@@ -36,7 +36,11 @@ const HEAD = `
     <!-- iOS standalone. Without apple-mobile-web-app-capable, a home-screen
          icon opens in Safari chrome instead of as an app. -->
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <!-- NOT black-translucent. That makes iOS paint the page UNDER the status
+         bar and apply its own blur over the top of the app, which looked like
+         a rendering bug. "black" reserves the strip and starts the app below
+         it. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
     <meta name="apple-mobile-web-app-title" content="Fanfare">
     <link rel="apple-touch-icon" href="/icons/icon-192.png">
     <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512.png">
@@ -47,12 +51,32 @@ const HEAD = `
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 
     <style>
-      /* Kill the iOS rubber-band scroll — the scoring screen is fixed, and
-         bouncing reveals a white gap under the button pad. */
-      html, body, #root { height: 100%; overscroll-behavior: none; }
-      body { margin: 0; background: #0F172A; -webkit-tap-highlight-color: transparent; }
+      /* 100% resolves against a viewport iOS reports before its chrome settles,
+         which left the app short and showed the page background below the tab
+         bar. 100dvh tracks the real visible area; the 100% line is the
+         fallback for browsers without dvh. */
+      html, body, #root { height: 100%; }
+      @supports (height: 100dvh) {
+        html, body, #root { height: 100dvh; }
+      }
+      /* Belt and braces for the installed PWA, where the visual viewport can
+         still be a few pixels taller than what's actually visible. */
+      @supports (height: -webkit-fill-available) {
+        html, body, #root { min-height: -webkit-fill-available; }
+      }
+      html, body, #root { overscroll-behavior: none; }
+      body {
+        margin: 0;
+        background: #F8FAFC;
+        -webkit-tap-highlight-color: transparent;
+        /* Never scroll the page itself — screens manage their own scrolling.
+           Page-level scroll is what produced the rubber-band gap. */
+        position: fixed;
+        width: 100%;
+        overflow: hidden;
+      }
       * { -webkit-touch-callout: none; }
-      input, textarea { -webkit-user-select: text; user-select: text; }
+      input, textarea, [contenteditable] { -webkit-user-select: text; user-select: text; }
     </style>
 
     <script>

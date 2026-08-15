@@ -11,6 +11,7 @@ import {
   subscribeToGame, appendEvent, createSequencer, syncGameSummary,
   undoLastEvent, holdsBaton,
 } from '../services/gameService.js';
+import { shouldSyncSummary } from '../shared/gameSummary.js';
 import { currentUid } from '../services/authService.js';
 
 /** The game doc mirror is for list views only — it must never gate the UI. */
@@ -73,8 +74,12 @@ export function useGame(teamId, gameId, { rules, config, names }) {
    * everyone who isn't scoring.
    */
   useEffect(() => {
-    if (canScore && snapshot?.state) scheduleSummary(snapshot.state);
-  }, [canScore, snapshot?.state?.lastEventSeq, scheduleSummary, snapshot?.state]);
+    // Second guard, independent of the first: a scheduled game is never
+    // mirrored, so opening it can't move it.
+    if (canScore && shouldSyncSummary(snapshot?.game, snapshot?.state)) {
+      scheduleSummary(snapshot.state);
+    }
+  }, [canScore, snapshot?.game, snapshot?.state?.lastEventSeq, scheduleSummary, snapshot?.state]);
 
   return {
     game: snapshot?.game ?? null,

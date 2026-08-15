@@ -17,24 +17,32 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { tapLight, tapMedium } from '../../../services/haptics';
 import { EV } from '../events.js';
 import {
-  CONTROL_GROUPS, getVisibleControls, weArePitching,
+  CONTROL_GROUPS, getVisibleControls, weArePitching, showsPitchTally,
 } from '../scoringModes.js';
 import { colors, radius, spacing, text, tap, shadow } from '../../../theme/tokens.js';
 
+/**
+ * Full words rather than scorekeeper shorthand. "GO" and "FO" are obvious to
+ * someone who has kept a book for years and opaque to the parent handed the
+ * phone in the third inning — and that parent is who this has to work for.
+ *
+ * Three across instead of five, so the words fit at a readable size and the
+ * targets get bigger.
+ */
 const LABELS = {
-  [EV.BALL]: 'BALL',
-  [EV.STRIKE_SWINGING]: 'STRIKE',
-  [EV.FOUL]: 'FOUL',
-  [EV.SINGLE]: '1B',
-  [EV.DOUBLE]: '2B',
-  [EV.TRIPLE]: '3B',
-  [EV.HOME_RUN]: 'HR',
-  [EV.WALK]: 'BB',
-  [EV.GROUND_OUT]: 'GO',
-  [EV.FLY_OUT]: 'FO',
-  [EV.STRIKEOUT]: 'K',
-  [EV.FIELDERS_CHOICE]: 'FC',
-  [EV.REACHED_ON_ERROR]: 'E',
+  [EV.BALL]: 'Ball',
+  [EV.STRIKE_SWINGING]: 'Strike',
+  [EV.FOUL]: 'Foul',
+  [EV.SINGLE]: 'Single',
+  [EV.DOUBLE]: 'Double',
+  [EV.TRIPLE]: 'Triple',
+  [EV.HOME_RUN]: 'Home Run',
+  [EV.WALK]: 'Walk',
+  [EV.GROUND_OUT]: 'Ground Out',
+  [EV.FLY_OUT]: 'Fly Out',
+  [EV.STRIKEOUT]: 'Strikeout',
+  [EV.FIELDERS_CHOICE]: "Fielder's Choice",
+  [EV.REACHED_ON_ERROR]: 'Error',
 };
 
 function Key({ label, onPress, variant, disabled }) {
@@ -62,7 +70,7 @@ function Key({ label, onPress, variant, disabled }) {
         disabled && styles.keyDisabled,
       ]}
     >
-      <Text style={[
+      <Text numberOfLines={2} style={[
         styles.keyText,
         (variant === 'pitch' || variant === 'strike') && styles.keyTextLarge,
       ]}>
@@ -76,10 +84,14 @@ function PadLabel({ children }) {
   return <Text style={styles.padLabel}>{children}</Text>;
 }
 
-function ActionPads({ state, mode, homeOrAway, onEvent, onMore, onUndo, disabled }) {
+function ActionPads({ state, mode, homeOrAway, rules, onEvent, onMore, onUndo, disabled }) {
   const pitching = weArePitching(state.isTop, homeOrAway);
   const groups = getVisibleControls(mode, pitching);
   const showPitch = !!groups[CONTROL_GROUPS.PITCH];
+  const showTally = showsPitchTally(mode, pitching);
+  const pitcherId = state.pitchers[state.isTop ? 'home' : 'away'];
+  const pitchCount = state.pitchCounts[pitcherId] ?? 0;
+  const overLimit = !!rules?.maxPitchesPerOuting && pitchCount >= rules.maxPitchesPerOuting;
 
   return (
     <View style={styles.pads}>
@@ -88,7 +100,7 @@ function ActionPads({ state, mode, homeOrAway, onEvent, onMore, onUndo, disabled
           <PadLabel>
             {pitching ? 'Pitch · counts toward the limit' : 'Pitch'}
           </PadLabel>
-          <View style={styles.row3}>
+          <View style={styles.grid}>
             {groups[CONTROL_GROUPS.PITCH].map((ev) => (
               <Key
                 key={ev}
@@ -102,8 +114,30 @@ function ActionPads({ state, mode, homeOrAway, onEvent, onMore, onUndo, disabled
         </>
       )}
 
+      {showTally && (
+        <>
+          <PadLabel>
+            Pitch count · {pitchCount}
+            {rules?.maxPitchesPerOuting ? ` of ${rules.maxPitchesPerOuting}` : ''}
+          </PadLabel>
+          <Pressable
+            onPress={() => { tapMedium(); onEvent(EV.PITCH_TALLY); }}
+            disabled={disabled}
+            style={({ pressed }) => [styles.tally, pressed && styles.keyPressed,
+                                     overLimit && styles.tallyOver]}
+            accessibilityRole="button"
+            accessibilityLabel="Count one pitch"
+          >
+            <Text style={styles.tallyText}>+1 PITCH</Text>
+            <Text style={styles.tallySub}>
+              {overLimit ? 'OVER THE LIMIT' : 'keeps rest days accurate'}
+            </Text>
+          </Pressable>
+        </>
+      )}
+
       <PadLabel>On base</PadLabel>
-      <View style={styles.row5}>
+      <View style={styles.grid}>
         {groups[CONTROL_GROUPS.ON_BASE].map((ev) => (
           <Key key={ev} label={LABELS[ev]} variant="hit"
                disabled={disabled} onPress={() => onEvent(ev)} />
@@ -111,7 +145,7 @@ function ActionPads({ state, mode, homeOrAway, onEvent, onMore, onUndo, disabled
       </View>
 
       <PadLabel>Out</PadLabel>
-      <View style={styles.row5}>
+      <View style={styles.grid}>
         {groups[CONTROL_GROUPS.OUT].map((ev) => (
           <Key key={ev} label={LABELS[ev]} variant="out"
                disabled={disabled} onPress={() => onEvent(ev)} />
@@ -137,37 +171,52 @@ function ActionPads({ state, mode, homeOrAway, onEvent, onMore, onUndo, disabled
 const styles = StyleSheet.create({
   pads: { paddingHorizontal: spacing.md, paddingBottom: spacing.md, gap: spacing.sm },
   padLabel: { ...text.label, color: colors.pencil, paddingLeft: 3, marginBottom: -2 },
-  row3: { flexDirection: 'row', gap: spacing.sm },
-  row5: { flexDirection: 'row', gap: 6 },
+  // Three per row, wrapping. basis 31% leaves room for two gaps.
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
 
   key: {
-    flex: 1,
-    borderWidth: 1, borderColor: colors.line,
+    flexBasis: '31.5%',
+    flexGrow: 1,
+    // One outline for every control on this screen. A single button with a
+    // heavier border read as "selected"; uniform weight reads as a keypad.
+    borderWidth: 2, borderColor: colors.navy,
     backgroundColor: colors.card,
     borderRadius: radius.md,
     alignItems: 'center', justifyContent: 'center',
     ...shadow.card,
   },
   keyPitch:  { height: tap.primary },
-  // Previously filled navy, which read as permanently selected. Weight and a
-  // heavier border distinguish it without looking active.
-  keyStrike: { height: tap.primary, borderColor: colors.navy, borderWidth: 2 },
-  keyHit:    { height: tap.secondary, backgroundColor: '#FFFDF8', borderColor: '#CFC2AC' },
+  keyStrike: { height: tap.primary },
+  keyHit:    { height: tap.secondary, backgroundColor: '#FFFDF8' },
   keyOut:    { height: tap.secondary },
+  // "Fielder's Choice" needs two lines at this width.
   keyPressed: { transform: [{ scale: 0.965 }], backgroundColor: '#F0EDE6' },
   keyDisabled: { opacity: 0.4 },
 
-  keyText: { ...text.buttonSecondary, color: colors.navy },
-  keyTextLarge: { ...text.buttonPrimary, color: colors.navy },
+  keyText: {
+    ...text.buttonSecondary, color: colors.navy,
+    fontSize: 13, textAlign: 'center', paddingHorizontal: 4,
+  },
+  keyTextLarge: { ...text.buttonPrimary, color: colors.navy, fontSize: 15 },
 
   utility: { flexDirection: 'row', gap: spacing.sm, marginTop: 1 },
   util: {
     flex: 1, height: tap.utility, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.line,
+    borderWidth: 2, borderColor: colors.navy,
+    backgroundColor: colors.card,
     alignItems: 'center', justifyContent: 'center',
   },
-  utilUndo: { borderColor: '#D3C4C4' },
+  utilUndo: { borderColor: colors.out },
   utilText: { ...text.buttonSecondary, fontSize: 12, letterSpacing: 0.7, color: colors.pencil },
+
+  tally: {
+    height: tap.primary, borderRadius: radius.md,
+    borderWidth: 2, borderColor: colors.navy, backgroundColor: colors.card,
+    alignItems: 'center', justifyContent: 'center', ...shadow.card,
+  },
+  tallyOver: { borderColor: colors.out, backgroundColor: '#FDECEC' },
+  tallyText: { ...text.buttonPrimary, color: colors.navy },
+  tallySub: { ...text.label, fontSize: 8, color: colors.pencil, marginTop: 2 },
 });
 
 export default memo(ActionPads);

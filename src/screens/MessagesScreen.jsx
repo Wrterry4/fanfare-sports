@@ -21,6 +21,8 @@ import { useAuth } from '../hooks/AuthProvider.jsx';
 import {
   subscribeMembers, ensureConversation, conversationId, ROLE_LABELS,
 } from '../services/membership.js';
+import AppHeader, { SegmentedTabs } from '../components/AppHeader.jsx';
+import AccountSheet from '../components/AccountSheet.jsx';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 import { multilineStyle } from '../theme/inputs.js';
 
@@ -30,6 +32,7 @@ export default function MessagesScreen() {
   const [tab, setTab] = useState('team');
   const [members, setMembers] = useState([]);
   const [openDm, setOpenDm] = useState(null);
+  const [menu, setMenu] = useState(false);
 
   useEffect(() => {
     if (!team?.id) return undefined;
@@ -41,25 +44,24 @@ export default function MessagesScreen() {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <View style={styles.header}>
-        <Text style={styles.h1}>
-          {openDm ? (openDm.displayName || 'Direct message') : 'Messages'}
-        </Text>
-        {openDm ? (
-          <Pressable onPress={() => setOpenDm(null)} style={styles.back}>
-            <Text style={styles.backText}>‹ ALL MESSAGES</Text>
-          </Pressable>
-        ) : (
-          <View style={styles.tabs}>
-            {[['team', 'Team chat'], ['direct', 'Direct']].map(([k, l]) => (
-              <Pressable key={k} onPress={() => setTab(k)}
-                style={[styles.tab, tab === k && styles.tabOn]}>
-                <Text style={[styles.tabText, tab === k && styles.tabTextOn]}>{l}</Text>
-              </Pressable>
-            ))}
-          </View>
-        )}
-      </View>
+      {openDm ? (
+        // In a thread the other person's name is centred on the back row,
+        // which is where a messaging app puts it.
+        <AppHeader
+          team={team}
+          onBack={() => setOpenDm(null)}
+          centerTitle={openDm.displayName || 'Direct message'}
+        />
+      ) : (
+        <>
+          <AppHeader team={team} onMenu={() => setMenu(true)} />
+          <SegmentedTabs
+            options={[['team', 'Team chat'], ['direct', 'Direct']]}
+            value={tab} onChange={setTab}
+          />
+        </>
+      )}
+      <AccountSheet visible={menu} onClose={() => setMenu(false)} />
 
       {openDm
         ? <Thread teamId={team.id} user={user} other={openDm} />
@@ -126,7 +128,9 @@ function Thread({ teamId, user, other }) {
 }
 
 function DirectList({ members, user, onOpen }) {
-  const others = members.filter((m) => m.uid !== user?.uid);
+  // Fans are excluded from chat by the rules, so listing them here would only
+  // offer threads that can't be opened.
+  const others = members.filter((m) => m.uid !== user?.uid && m.role !== 'fan');
   return (
     <ScrollView contentContainerStyle={styles.scroll}>
       {others.length === 0 && (

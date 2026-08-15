@@ -9,45 +9,98 @@
  * width on both sides while pushing the buttons off screen.
  */
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
-  View, Text, Pressable, StyleSheet, ActivityIndicator, Alert, useWindowDimensions,
+  View, Text, Pressable, StyleSheet, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 
+import AppHeader from '../components/AppHeader.jsx';
+import AccountSheet from '../components/AccountSheet.jsx';
 import Scoreboard from '../components/Scoreboard.jsx';
 import LineScore from '../components/LineScore.jsx';
 import { sportForTeam } from '../sports/registry.js';
 import { useGameDay } from '../hooks/useGameDay.js';
 import { useGame } from '../hooks/useGame.js';
+import { useWalkUp } from '../hooks/useWalkUp.js';
+import { playClip, stopClip, isPlaying } from '../services/audioStore';
 import { useAuth } from '../hooks/AuthProvider.jsx';
 import { requestBaton, approveBaton, denyBaton } from '../services/gameService.js';
 import { db, doc, updateDoc } from '../services/firebase';
+import { confirm, notify } from '../utils/confirm.js';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 
 export default function GameDayScreen() {
-  const { team, game, roster, rules, config, names, loading, error } = useGameDay();
+  const { team, game, allGames, roster, rules, config, names, loading, error } = useGameDay();
+  const navigation = useNavigation();
 
-  if (loading) return <Centered><ActivityIndicator color={colors.primary} /></Centered>;
-  if (error) return <Centered><Text style={styles.msg}>{error.message}</Text></Centered>;
-  if (!team) return <Centered><Text style={styles.msg}>No team yet.</Text></Centered>;
-  if (!game || !config) {
+  /**
+   * Once a game is on screen it STAYS there, even after it goes final — so the
+   * scorekeeper can look at the finished line score instead of being thrown
+   * onto next week's game the moment they record the last out.
+   *
+   * The pin clears when the tab loses focus, so coming back shows whatever is
+   * next up with a Start button.
+   */
+  const [pinnedId, setPinnedId] = useState(null);
+
+  useEffect(() => {
+    const unsub = navigation.addListener('blur', () => setPinnedId(null));
+    return unsub;
+  }, [navigation]);
+
+  useEffect(() => {
+    if (game?.id) setPinnedId((cur) => cur ?? game.id);
+  }, [game?.id]);
+
+  const shown = useMemo(() => {
+    if (!pinnedId) return game;
+    return allGames?.find((g) => g.id === pinnedId) ?? game;
+  }, [pinnedId, allGames, game]);
+
+  const [menu, setMenu] = useState(false);
+  const header = (
+    <>
+      <AppHeader team={team} onMenu={() => setMenu(true)} />
+      <AccountSheet visible={menu} onClose={() => setMenu(false)} />
+    </>
+  );
+  const headerWith = (right) => (
+    <>
+      <AppHeader team={team} onMenu={() => setMenu(true)} right={right} />
+      <AccountSheet visible={menu} onClose={() => setMenu(false)} />
+    </>
+  );
+
+  if (loading) {
+    return <Shell header={header}><Centered><ActivityIndicator color={colors.primary} /></Centered></Shell>;
+  }
+  if (error) {
+    return <Shell header={header}><Centered><Text style={styles.msg}>{error.message}</Text></Centered></Shell>;
+  }
+  if (!team) {
+    return <Shell header={header}><Centered><Text style={styles.msg}>No team yet.</Text></Centered></Shell>;
+  }
+  if (!shown || !config) {
     return (
-      <Centered>
-        <Text style={styles.emptyTitle}>No game scheduled</Text>
-        <Text style={styles.msg}>Add one from the Schedule tab and start it there.</Text>
-      </Centered>
+      <Shell header={header}>
+        <Centered>
+          <Text style={styles.emptyTitle}>No game scheduled</Text>
+          <Text style={styles.msg}>Add one from the Schedule tab and start it there.</Text>
+        </Centered>
+      </Shell>
     );
   }
 
   return (
-    <LiveGame key={game.id}
-      team={team} game={game} roster={roster}
+    <LiveGame key={shown.id} headerWith={headerWith}
+      team={team} game={shown} roster={roster}
       rules={rules} config={config} names={names} />
   );
 }
 
-function LiveGame({ team, game, roster, rules, config, names }) {
+function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
   const sport = sportForTeam(team);
   const { Field, ActionPads, RunnerSheet, SCORING_MODES } = sport;
   const { user } = useAuth();
@@ -55,6 +108,8 @@ function LiveGame({ team, game, roster, rules, config, names }) {
 
   const [mode, setMode] = useState(SCORING_MODES.FULL);
   const [runnerSheet, setRunnerSheet] = useState(null);
+  const [muted, setMuted] = useState(false);
+  const [playingFor, setPlayingFor] = useState(null);
 
   const { state, stats, canScore, isStale, record, undo } =
     useGame(team.id, game.id, { rules, config, names });
@@ -62,21 +117,52 @@ function LiveGame({ team, game, roster, rules, config, names }) {
   const byId = useMemo(
     () => Object.fromEntries(roster.map((p) => [p.playerId, p])), [roster]);
 
-  const jerseyFor = useCallback((id) => byId[id]?.jerseyNumber ?? null, [byId]);
+  // Trim config lives on the roster doc (synced); the audio itself is local.
+  const audioConfig = useMemo(() => Object.fromEntries(
+    roster.filter((p) => p.audioConfig).map((p) => [p.playerId, p.audioConfig])
+  ), [roster]);
 
-  const handleUndo = useCallback(() => {
-    Alert.alert('Undo last entry?', 'Removes the most recent play from the book.',
-      [{ text: 'Cancel', style: 'cancel' },
-       { text: 'Undo', style: 'destructive', onPress: undo }]);
+  const jerseyFor = useCallback((id) => {
+    if (byId[id]) return byId[id].jerseyNumber ?? null;
+    // opp_4 -> 4, so the diamond and the up-next strip aren't full of dashes
+    // while the other team bats.
+    const m = /^opp_(\d+)$/.exec(String(id));
+    return m ? Number(m[1]) : null;
+  }, [byId]);
+
+  /** Roster player if we have one, otherwise a numbered opponent slot. */
+  const personFor = useCallback((id) => {
+    if (byId[id]) return byId[id];
+    const m = /^opp_(\d+)$/.exec(String(id));
+    if (!m) return null;
+    return { playerId: id, jerseyNumber: Number(m[1]),
+             firstName: 'Batter', lastName: m[1], primaryPosition: null };
+  }, [byId]);
+
+  // Only the device keeping the book plays anything — it's the one wired to
+  // the speaker. Thirty phones in the bleachers would be chaos.
+  useWalkUp({
+    batterId: state?.batterId,
+    enabled: canScore && !muted && game.status === 'live',
+    audioConfig,
+  });
+
+  const handleUndo = useCallback(async () => {
+    const ok = await confirm({
+      title: 'Undo last entry?',
+      message: 'Removes the most recent play from the book.',
+      confirmLabel: 'Undo', destructive: true,
+    });
+    if (ok) undo();
   }, [undo]);
 
   if (!state) return <Centered><ActivityIndicator color={colors.primary} /></Centered>;
 
   const battingSide = state.isTop ? 'away' : 'home';
-  const batter = byId[state.batterId];
+  const batter = personFor(state.batterId);
   const batterStats = stats?.batting?.[state.batterId];
   const pitcherId = state.pitchers[state.isTop ? 'home' : 'away'];
-  const pitcher = byId[pitcherId];
+  const pitcher = personFor(pitcherId);
   const pitchCount = state.pitchCounts[pitcherId] ?? 0;
 
   // Small phones can't fit a large diamond plus three rows of buttons.
@@ -84,22 +170,24 @@ function LiveGame({ team, game, roster, rules, config, names }) {
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <Scoreboard
-        state={state}
-        awayName={game.homeOrAway === 'home' ? game.opponent : team.name}
-        homeName={game.homeOrAway === 'home' ? team.name : game.opponent}
-      />
+      {/* Inning, count and outs sit in the header's right slot — right
+          justified, and one bar fewer on a screen where nothing scrolls. */}
+      {headerWith(<Scoreboard state={state} />)}
 
       <LineScore
         state={state} rules={rules}
         awayName={game.homeOrAway === 'home' ? game.opponent : team.name}
         homeName={game.homeOrAway === 'home' ? team.name : game.opponent}
+        muted={muted} onToggleMute={() => setMuted((m) => !m)}
+        modeLabel={mode === SCORING_MODES.FULL ? 'EVERY PITCH' : 'OUTCOMES ONLY'}
+        onToggleMode={canScore
+          ? () => setMode(mode === SCORING_MODES.FULL ? SCORING_MODES.CASUAL : SCORING_MODES.FULL)
+          : null}
       />
 
       <BatonStrip
         game={game} teamId={team.id} uid={user?.uid}
-        canScore={canScore} isStale={isStale}
-        mode={mode} onChangeMode={setMode} modes={SCORING_MODES}
+        canScore={canScore} isStale={isStale} names={names}
       />
 
       <View style={styles.middle}>
@@ -112,6 +200,26 @@ function LiveGame({ team, game, roster, rules, config, names }) {
               ? `${batterStats.H}-for-${batterStats.AB}${batterStats.RBI ? `, ${batterStats.RBI} RBI` : ''}`
               : '0-for-0'}
             accent={colors.primary}
+            // Auto-play fires once when the batter changes. This replays it —
+            // for the kid who steps out, the song that didn't catch, or the
+            // first tap of a session before the browser has allowed audio.
+            playing={playingFor === batter?.playerId}
+            onPlay={batter && audioConfig[batter.playerId]
+              ? () => {
+                  const id = batter.playerId;
+                  if (playingFor === id) { stopClip(); setPlayingFor(null); return; }
+                  const cfg = audioConfig[id];
+                  const secs = cfg.durationSeconds ?? 15;
+                  playClip(id, { startSeconds: cfg.startSeconds ?? 0, durationSeconds: secs })
+                    .then((ok) => {
+                      if (!ok) return;
+                      setPlayingFor(id);
+                      // Clear the pause state when the clip fades out on its own.
+                      setTimeout(() => setPlayingFor((cur) => (cur === id ? null : cur)), secs * 1000);
+                    })
+                    .catch(() => {});
+                }
+              : null}
           />
           <PersonCard
             label="Pitching"
@@ -145,7 +253,7 @@ function LiveGame({ team, game, roster, rules, config, names }) {
             onMore={() => setRunnerSheet({ base: null, playerId: null })}
             disabled={state.status === 'final'}
           />
-          <UpNext state={state} byId={byId} side={battingSide} />
+          <UpNext state={state} personFor={personFor} side={battingSide} />
         </>
       ) : (
         <ViewerPad state={state} />
@@ -161,56 +269,51 @@ function LiveGame({ team, game, roster, rules, config, names }) {
 }
 
 /**
- * The baton, always visible — as status when watching, as controls when
- * holding it. Previously this rendered only for the scorekeeper, so a viewer
- * had no way to ask for the book and no sign anyone else held it.
+ * The handoff strip.
+ *
+ * It only appears when there's something to act on: an incoming request, your
+ * own pending request, or a stale feed. Holding the book quietly needs no
+ * banner, and the mode toggle that used to share this bar has moved into the
+ * scoreboard corner — so in the ordinary case this costs no vertical space at
+ * all.
  */
-function BatonStrip({ game, teamId, uid, canScore, isStale, mode, onChangeMode, modes }) {
+function BatonStrip({ game, teamId, uid, canScore, isStale, names }) {
   const requester = game.batonRequestedBy;
   const iRequested = requester === uid;
+  const incoming = canScore && requester && !iRequested;
 
-  if (canScore) {
+  if (incoming) {
     return (
       <View style={styles.strip}>
-        {requester && !iRequested ? (
-          <>
-            <Text style={styles.stripText}>Someone asked for the book</Text>
-            <View style={styles.stripBtns}>
-              <Pressable onPress={() => denyBaton(teamId, game.id)} style={styles.ghostBtn}>
-                <Text style={styles.ghostBtnText}>NOT NOW</Text>
-              </Pressable>
-              <Pressable onPress={() => approveBaton(teamId, game.id, requester)} style={styles.primaryBtn}>
-                <Text style={styles.primaryBtnText}>PASS IT</Text>
-              </Pressable>
-            </View>
-          </>
-        ) : (
-          <>
-            <Text style={styles.stripText}>You're keeping the book</Text>
-            <Pressable
-              onPress={() => onChangeMode(mode === modes.FULL ? modes.CASUAL : modes.FULL)}
-              style={styles.ghostBtn}
-            >
-              <Text style={styles.ghostBtnText}>
-                {mode === modes.FULL ? 'EVERY PITCH' : 'OUTCOMES ONLY'}
-              </Text>
-            </Pressable>
-          </>
-        )}
+        <Text style={styles.stripText} numberOfLines={1}>
+          {names?.[requester] ? `${names[requester]} wants the book` : 'Someone asked for the book'}
+        </Text>
+        <View style={styles.stripBtns}>
+          <Pressable onPress={() => denyBaton(teamId, game.id)} style={styles.ghostBtn}>
+            <Text style={styles.ghostBtnText}>NOT NOW</Text>
+          </Pressable>
+          <Pressable onPress={() => approveBaton(teamId, game.id, requester)} style={styles.primaryBtn}>
+            <Text style={styles.primaryBtnText}>PASS IT</Text>
+          </Pressable>
+        </View>
       </View>
     );
   }
 
+  if (canScore) return null;   // keeping the book quietly needs no banner
+
   return (
     <View style={[styles.strip, isStale && styles.stripStale]}>
-      <Text style={styles.stripText}>
+      <Text style={styles.stripText} numberOfLines={1}>
         {isStale ? 'Scorer may be offline — this may be behind' : 'Watching live'}
       </Text>
       {iRequested ? (
-        <Text style={styles.pending}>REQUESTED…</Text>
+        <Pressable onPress={() => denyBaton(teamId, game.id)} style={styles.ghostBtn}>
+          <Text style={styles.ghostBtnText}>CANCEL REQUEST</Text>
+        </Pressable>
       ) : (
         <Pressable onPress={() => requestBaton(teamId, game.id, uid)} style={styles.primaryBtn}>
-          <Text style={styles.primaryBtnText}>REQUEST BOOK</Text>
+          <Text style={styles.primaryBtnText}>ASK FOR THE BOOK</Text>
         </Pressable>
       )}
     </View>
@@ -226,7 +329,7 @@ function StartGate({ teamId, game, canScore }) {
   const start = async () => {
     setBusy(true);
     try { await updateDoc(doc(db, 'teams', teamId, 'games', game.id), { status: 'live', actualStartAt: new Date() }); }
-    catch (e) { Alert.alert('Could not start', e.message); setBusy(false); }
+    catch (e) { notify('Could not start', e.message); setBusy(false); }
   };
   return (
     <View style={styles.gate}>
@@ -234,8 +337,8 @@ function StartGate({ teamId, game, canScore }) {
         {game.homeOrAway === 'home' ? 'vs' : '@'} {game.opponent}
       </Text>
       <Text style={styles.gateSub}>
-        {[game.park, game.field ? `Field ${game.field}` : null].filter(Boolean).join(' · ')
-          || 'Not started yet'}
+        {[whenText(game.date), game.park, game.field ? `Field ${game.field}` : null]
+          .filter(Boolean).join(' · ') || 'No details yet'}
       </Text>
       {canScore ? (
         <Pressable onPress={start} disabled={busy} style={styles.gateBtn}>
@@ -253,11 +356,11 @@ function StartGate({ teamId, game, canScore }) {
  * "Jack, you're up next" — having it on screen saves them counting down the
  * lineup card between pitches.
  */
-function UpNext({ state, byId, side }) {
+function UpNext({ state, personFor, side }) {
   const lineup = state.lineups[side];
   if (!lineup?.length) return null;
   const idx = state.battingIndex[side];
-  const at = (offset) => byId[lineup[(idx + offset) % lineup.length]?.playerId];
+  const at = (offset) => personFor(lineup[(idx + offset) % lineup.length]?.playerId);
 
   const onDeck = at(1);
   const inHole = at(2);
@@ -298,7 +401,7 @@ function ViewerPad({ state }) {
   );
 }
 
-function PersonCard({ label, jersey, name, detail, accent, warn }) {
+function PersonCard({ label, jersey, name, detail, accent, warn, onPlay, playing }) {
   return (
     <View style={[styles.person, warn && styles.personWarn]}>
       <Text style={styles.personLabel}>{label}</Text>
@@ -312,9 +415,26 @@ function PersonCard({ label, jersey, name, detail, accent, warn }) {
             {detail}
           </Text>
         </View>
+        {onPlay && (
+          <Pressable onPress={onPlay} style={[styles.playBtn, playing && styles.playBtnOn]}
+            hitSlop={8} accessibilityRole="button"
+            accessibilityLabel={playing ? 'Stop walk-up song' : 'Play walk-up song'}>
+            <Text style={[styles.playBtnText, playing && styles.playBtnTextOn]}>
+              {playing ? '❚❚' : '▶'}
+            </Text>
+          </Pressable>
+        )}
       </View>
     </View>
   );
+}
+
+function whenText(d) {
+  const date = d?.toDate?.() ?? (d ? new Date(d) : null);
+  if (!date || isNaN(date)) return null;
+  const day = date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const time = date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return `${day} · ${time}`;
 }
 
 const ordinal = (n) => {
@@ -322,8 +442,16 @@ const ordinal = (n) => {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 };
 
+/** Keeps the header on screen for the loading and empty states too. */
+const Shell = ({ header, children }) => (
+  <SafeAreaView style={styles.root} edges={['top']}>
+    {header}
+    {children}
+  </SafeAreaView>
+);
+
 const Centered = ({ children }) => (
-  <SafeAreaView style={styles.centered}>{children}</SafeAreaView>
+  <View style={styles.centered}>{children}</View>
 );
 
 const styles = StyleSheet.create({
@@ -423,4 +551,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 34,
   },
   gateBtnText: { ...text.buttonSecondary, color: '#FFF', letterSpacing: 0.8 },
+
+  playBtn: {
+    width: 32, height: 32, borderRadius: 16,
+    borderWidth: 2, borderColor: colors.gold, backgroundColor: colors.card,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  playBtnText: { fontSize: 12, color: colors.gold, marginLeft: 2 },
+  playBtnOn: { backgroundColor: colors.gold },
+  playBtnTextOn: { color: colors.navy, fontSize: 10, marginLeft: 0 },
 });

@@ -28,7 +28,7 @@
  */
 
 import {
-  db, doc, collection, setDoc, writeBatch, serverTimestamp, arrayUnion,
+  db, doc, collection, setDoc, getDoc, writeBatch, serverTimestamp, arrayUnion,
   httpsCallable, functions,
 } from './firebase';
 import { currentUid } from './authService.js';
@@ -88,8 +88,13 @@ export async function createTeam({ name, season, division, ageGroup, sport = 'ba
     createdAt: serverTimestamp(),
   });
 
+  // Name denormalized so member lists and chat can show it without reading
+  // other people's user documents.
+  const me = await getDoc(doc(db, 'users', uid)).catch(() => null);
+
   await setDoc(doc(db, 'teams', teamRef.id, 'members', uid), {
     role: 'owner',
+    displayName: me?.data()?.displayName || null,
     linkedPlayerIds: [],
     notificationPrefs: DEFAULT_STAFF_PREFS,
     invitedBy: null,
@@ -138,6 +143,10 @@ export async function createPlayer({ teamId, firstName, lastName, birthYear, jer
   });
 
   await setDoc(doc(db, 'teams', teamId, 'roster', playerRef.id), {
+    // Denormalized so any team member can render a scoreboard. The protected
+    // material — birth year, guardians, stats — stays on /players.
+    firstName: firstName.trim(),
+    lastName: (lastName || '').trim(),
     jerseyNumber: jerseyNumber ?? null,
     primaryPosition: primaryPosition || null,
     active: true,
@@ -160,11 +169,17 @@ export async function createPlayers(teamId, players) {
 // Games
 // ---------------------------------------------------------------------------
 
+/**
+ * @deprecated Superseded by createEvent() in eventService.js, which handles
+ * practices and team events too. Kept because SetupScreen creates the first
+ * game during onboarding and that path is worth leaving undisturbed.
+ */
 export async function createGame({ teamId, opponent, date, homeOrAway, rules, lineup = [] }) {
   const uid = currentUid();
   const gameRef = doc(collection(db, 'teams', teamId, 'games'));
 
   await setDoc(gameRef, {
+    type: 'game',
     opponent: opponent.trim(),
     date: date || serverTimestamp(),
     homeOrAway,

@@ -11,7 +11,9 @@ import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import RootNavigator from './src/navigation/RootNavigator.jsx';
+import ErrorBoundary from './src/components/ErrorBoundary.jsx';
 import { AuthProvider } from './src/hooks/AuthProvider.jsx';
+import { ActiveTeamProvider } from './src/hooks/ActiveTeam.jsx';
 import { navigationRef } from './src/navigation/navigationRef.js';
 import { linkingConfig } from './src/navigation/linking.js';
 import { connectEmulators } from './src/services/firebase';
@@ -24,13 +26,17 @@ export default function App() {
     <SafeAreaProvider>
       {/* Light content on the navy scoreboard strip. */}
       <StatusBar barStyle="light-content" backgroundColor={colors.navy} />
+      <ErrorBoundary>
       <NavigationContainer ref={navigationRef} linking={linkingConfig}>
         {/* One auth listener for the whole app. Two would double-redeem
             pending invites and burn the single-use link. */}
         <AuthProvider>
-          <RootNavigator />
+          <ActiveTeamProvider>
+            <RootNavigator />
+          </ActiveTeamProvider>
         </AuthProvider>
       </NavigationContainer>
+      </ErrorBoundary>
     </SafeAreaProvider>
   );
 }
