@@ -33,8 +33,34 @@ import { formatBuildLabel } from '../shared/buildLabel.js';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 import { inputStyle } from '../theme/inputs.js';
 
+/**
+ * The submenu, in order. [key, title, staffOnly, subtitle]
+ *
+ * Grouped by WHO OWNS the setting rather than by topic, which is the split
+ * that was missing: rules of play belong to the coach and change how the
+ * scoring engine behaves, notifications are personal and per-user, the member
+ * list is informational. Stacked in one scroll, a parent opening Settings to
+ * mute chatter scrolled past pitch limits they must never touch.
+ */
+const PANES = [
+  ['league', 'League rules', true, 'Innings, limits, and how scoring works'],
+  ['team', 'Team', true, 'Color and team identity'],
+  ['notifications', 'Notifications', false, 'What this phone alerts you about'],
+  ['people', 'People', false, 'Who else is on this team'],
+  ['player', 'My player', false, 'The player you follow'],
+];
+
 export default function SettingsScreen() {
-  const { team, loading } = useGameDay();
+  const { team, roster, loading } = useGameDay();
+  /**
+   * Drill-down inside the tab rather than new navigator routes.
+   *
+   * AppHeader already takes onBack and centerTitle, the bottom tab bar stays
+   * visible, and there are no browser-back edge cases to handle on web —
+   * which pushing five routes onto the stack would have introduced for a
+   * menu that never goes more than one level deep.
+   */
+  const [pane, setPane] = useState('menu');
   const { user } = useAuth();
   // Not a hook — BUILD_INFO is fixed for the lifetime of this bundle, so
   // there's nothing to recompute on re-render.
@@ -128,36 +154,73 @@ export default function SettingsScreen() {
   // them, otherwise nobody could manage who they'd let in.
   const visibleMembers = isStaff ? members : members.filter((m) => m.role !== 'fan');
 
+  // Ids are what membership stores; names live on the roster. An id with no
+  // matching roster entry — a player removed after the link was made — is
+  // dropped rather than rendered as a blank row.
+  const linkedIds = member?.linkedPlayerIds ?? [];
+  const myPlayers = (roster || []).filter((p) => linkedIds.includes(p.playerId));
+
   const setNum = (k, v) => setRules((r) => ({ ...r, [k]: v === '' ? null : Number(v) }));
+
+  const paneTitle = PANES.find(([k]) => k === pane)?.[1];
 
   return (
     <SafeAreaView style={styles.root} edges={['top']}>
-      <AppHeader team={team} onMenu={() => setMenu(true)} />
+      <AppHeader
+        team={team}
+        onMenu={() => setMenu(true)}
+        onBack={pane === 'menu' ? undefined : () => setPane('menu')}
+        centerTitle={pane === 'menu' ? undefined : paneTitle}
+      />
       <AccountSheet visible={menu} onClose={() => setMenu(false)} />
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
 
-          {/* Staff only. The join code adds people to the team, which isn't a
-              fan's call to make — and a fan opening Settings to change their
-              notification preferences shouldn't be handed one. */}
-          {isStaff && (
-          <Section title="Invite people"
-                   sub="Anyone with this code can join the team. They see a player's stats only after you link them to that child.">
-            <View style={styles.codeBox}>
-              <Text style={styles.code}>{team.joinCode}</Text>
-            </View>
-            <Pressable onPress={copyInvite} style={styles.copyBtn}>
-              <Text style={styles.copyBtnText}>{copied ? 'COPIED ✓' : 'COPY INVITE'}</Text>
-            </Pressable>
-            <Text style={styles.hint}>
-              Copies a short message with the link. Paste it into a text or your
-              team's group chat.
-            </Text>
-          </Section>
-          )}
+          {/* ── The menu itself ────────────────────────────────────────────
+              Rows first, then the invite block, then the build stamp. The
+              invite stays on this page rather than behind a submenu because
+              it's the one thing here a coach does repeatedly — burying the
+              join code two taps deep to tidy up would cost more than the
+              tidiness is worth. */}
+          {pane === 'menu' && (<>
+            {PANES.filter(([, , staffOnly]) => !staffOnly || isStaff).map(([key, label, , sub]) => (
+              <Pressable key={key} onPress={() => setPane(key)} style={styles.menuRow}
+                accessibilityRole="button" accessibilityLabel={label}>
+                <View style={styles.flex}>
+                  <Text style={styles.menuLabel}>{label}</Text>
+                  <Text style={styles.menuSub}>{sub}</Text>
+                </View>
+                {key === 'people' && claims.length > 0 ? (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>{claims.length}</Text>
+                  </View>
+                ) : null}
+                <Text style={styles.chevron}>›</Text>
+              </Pressable>
+            ))}
 
-          {isStaff && claims.length > 0 && (
+            {/* Staff only. The join code adds people to the team, which isn't a
+                fan's call to make — and a fan opening Settings to change their
+                notification preferences shouldn't be handed one. */}
+            {isStaff && (
+            <Section title="Invite people"
+                     sub="Anyone with this code can join the team. They see a player's stats only after you link them to that child.">
+              <View style={styles.codeBox}>
+                <Text style={styles.code}>{team.joinCode}</Text>
+              </View>
+              <Pressable onPress={copyInvite} style={styles.copyBtn}>
+                <Text style={styles.copyBtnText}>{copied ? 'COPIED ✓' : 'COPY INVITE'}</Text>
+              </Pressable>
+              <Text style={styles.hint}>
+                Copies a short message with the link. Paste it into a text or your
+                team's group chat.
+              </Text>
+            </Section>
+            )}
+          </>)}
+
+          {pane === 'people' && isStaff && claims.length > 0 && (
             <Section title={`Requests · ${claims.length}`}
                      sub="Someone has asked to be linked to a player.">
               {claims.map((c) => (
@@ -180,6 +243,7 @@ export default function SettingsScreen() {
             </Section>
           )}
 
+          {pane === 'people' && (
           <Section title={`On this team · ${visibleMembers.length}`}>
             {visibleMembers.map((m) => (
               <View key={m.uid} style={styles.memberRow}>
@@ -193,15 +257,50 @@ export default function SettingsScreen() {
               </View>
             ))}
           </Section>
+          )}
 
+          {/* Linking to a player happens in Roster, where requestPlayerClaim
+              already lives. This shows what you're linked to and sends you
+              there to change it — two competing claim UIs would be worse
+              than one extra tap. */}
+          {pane === 'player' && (
+          <Section title="My player"
+                   sub="Who you follow on this team. Stats and notifications for a child are only visible once a coach links you.">
+            {myPlayers.length === 0 ? (
+              <Text style={styles.hint}>
+                You aren't linked to a player yet. Open the Roster tab, find your
+                child, and ask to be linked — a coach approves the request.
+              </Text>
+            ) : myPlayers.map((p) => (
+              <View key={p.playerId} style={styles.memberRow}>
+                <View style={styles.flex}>
+                  <Text style={styles.memberName}>
+                    {[p.firstName, p.lastName].filter(Boolean).join(' ') || 'Player'}
+                  </Text>
+                  <Text style={styles.memberRole}>
+                    {p.jersey ? `#${p.jersey}` : 'Linked to you'}
+                  </Text>
+                </View>
+              </View>
+            ))}
+            {myPlayers.length > 0 && (
+              <Text style={styles.hint}>
+                To link another player, or to remove one, use the Roster tab.
+              </Text>
+            )}
+          </Section>
+          )}
+
+          {pane === 'notifications' && (
           <Section title="Notifications"
                    sub="Yours, on this team. Everyone chooses their own.">
             <NotificationSettings team={team} member={member} isFan={isFan} />
           </Section>
+          )}
 
           {/* Rules of play are the coach's. Everyone else gets Settings for
               their own notification preferences and nothing more. */}
-          {isStaff && (<>
+          {pane === 'team' && isStaff && (
           <Section title="Team color"
                    sub="Their jersey color. Shows on the scoreboard and celebrations.">
             <TeamColorPicker
@@ -210,7 +309,9 @@ export default function SettingsScreen() {
               label={null}
             />
           </Section>
+          )}
 
+          {pane === 'league' && isStaff && (<>
           <Section title="Start from a preset"
                    sub="Overwrites the values below. Adjust anything afterward.">
             <View style={styles.chips}>
@@ -253,8 +354,9 @@ export default function SettingsScreen() {
 
           {/* Visible to every role, staff or not — this is a diagnostic
               anyone might need to read out loud on a phone call, not a
-              staff-only setting. */}
-          <Text style={styles.buildLabel}>{buildLabel}</Text>
+              staff-only setting. Menu page only: it's the bottom of
+              Settings, not the bottom of every subsection. */}
+          {pane === 'menu' && <Text style={styles.buildLabel}>{buildLabel}</Text>}
 
         </ScrollView>
       </KeyboardAvoidingView>
@@ -386,6 +488,20 @@ const styles = StyleSheet.create({
   cta: { height: 50, borderRadius: radius.md, backgroundColor: colors.navy, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm },
   ctaGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.line },
   ctaText: { ...text.buttonSecondary, color: '#FFF', letterSpacing: 0.8 },
+  menuRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
+    backgroundColor: colors.card, borderRadius: radius.lg,
+    paddingHorizontal: spacing.md, paddingVertical: 14,
+    marginBottom: spacing.sm, ...shadow.card,
+  },
+  menuLabel: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 15, color: colors.navy },
+  menuSub: { ...text.body, fontSize: 12, color: colors.pencil, marginTop: 2 },
+  chevron: { fontSize: 26, color: colors.pencil, marginTop: -3 },
+  badge: {
+    minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6,
+    backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
+  },
+  badgeText: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 12, color: '#FFF' },
   buildLabel: {
     ...text.label, fontSize: 9.5, color: colors.pencil, opacity: 0.6,
     textAlign: 'center', marginTop: spacing.xl, marginBottom: spacing.md,
