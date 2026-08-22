@@ -357,6 +357,7 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
       <WinCelebration
         outcome={celebration}
         teamName={team?.name}
+        opponent={game?.opponent}
         teamColor={resolveTeamColor(team)}
         onDismiss={() => setCelebration(null)}
       />

@@ -12,6 +12,7 @@
 
 import React, { memo } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
+import TickingNumber from './TickingNumber.jsx';
 import { colors, text } from '../theme/tokens.js';
 
 function LineScore({ grid, awayName, homeName, muted, onToggleMute, modeLabel, onToggleMode }) {
@@ -52,7 +53,7 @@ function LineScore({ grid, awayName, homeName, muted, onToggleMute, modeLabel, o
                 <Text key={i} style={styles.cell}>{c}</Text>
               ))}
               {row.totals.map((t, i) => (
-                <Text key={i} style={[styles.cell, styles.total]}>{t}</Text>
+                <TickingNumber key={i} style={[styles.cell, styles.total]} value={t} />
               ))}
             </View>
           ))}

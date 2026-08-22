@@ -21,11 +21,12 @@
  * mount and never recomputed, so the fall is deterministic for a given game.
  */
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, Pressable, StyleSheet, Animated, Easing, Dimensions } from 'react-native';
 
 import { colors, radius, spacing, shadow } from '../theme/tokens.js';
 import { outcomeHeadline } from '../shared/gameOutcome.js';
+import { shareCard } from '../services/shareCard';
 
 const PIECES = 42;
 const FALL_MS = 2600;
@@ -104,12 +105,35 @@ function Confetti({ palette, height, width }) {
  * @param teamColor  { fill, onFill } — the card takes the team's color on a win
  * @param onDismiss  tapping anywhere closes it
  */
-export default function WinCelebration({ outcome, teamName, teamColor, onDismiss }) {
+export default function WinCelebration({ outcome, teamName, opponent, teamColor, onDismiss }) {
   const opacity = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(0.8)).current;
   const { width, height } = Dimensions.get('window');
+  const [shareState, setShareState] = useState('idle');
 
   const won = outcome?.result === 'win';
+
+  /**
+   * The result names what happened rather than assuming it worked. A browser
+   * that can't share a file downloads it; one that can't do that copies the
+   * text — and telling someone "Shared!" when the card is sitting in their
+   * Downloads folder is how they conclude the button is broken.
+   */
+  const doShare = async () => {
+    setShareState('working');
+    const result = await shareCard({ outcome, teamName, opponent, teamColor });
+    setShareState(result);
+    setTimeout(() => setShareState('idle'), 2600);
+  };
+
+  const shareLabel = {
+    idle: 'SHARE FINAL SCORE',
+    working: 'PREPARING…',
+    shared: 'SHARED ✓',
+    downloaded: 'SAVED TO DOWNLOADS ✓',
+    copied: 'COPIED ✓',
+    failed: 'COULD NOT SHARE',
+  }[shareState];
 
   useEffect(() => {
     if (!outcome?.final) return;
@@ -154,7 +178,20 @@ export default function WinCelebration({ outcome, teamName, teamColor, onDismiss
           <Text style={[styles.score, { color: cardFg }]}>
             {outcome.us} — {outcome.them}
           </Text>
-          <Text style={[styles.tap, { color: cardFg }]}>TAP TO CLOSE</Text>
+
+          {/* Stops the tap from reaching the dismiss layer underneath —
+              sharing and closing are different intentions. */}
+          <Pressable
+            onPress={(e) => { e.stopPropagation?.(); doShare(); }}
+            style={[styles.shareBtn, { borderColor: cardFg }]}
+            accessibilityRole="button" accessibilityLabel="Share the final score"
+          >
+            <Text style={[styles.shareText, { color: cardFg }]}>
+              {shareLabel}
+            </Text>
+          </Pressable>
+
+          <Text style={[styles.tap, { color: cardFg }]}>TAP OUTSIDE TO CLOSE</Text>
         </Animated.View>
       </Pressable>
     </Animated.View>
@@ -182,6 +219,13 @@ const styles = StyleSheet.create({
   score: {
     fontFamily: 'Archivo', fontWeight: '900', fontSize: 46,
     fontVariant: ['tabular-nums'], marginTop: spacing.sm,
+  },
+  shareBtn: {
+    marginTop: spacing.lg, paddingHorizontal: spacing.lg, paddingVertical: 11,
+    borderRadius: radius.md, borderWidth: 2,
+  },
+  shareText: {
+    fontFamily: 'Archivo', fontWeight: '800', fontSize: 12.5, letterSpacing: 0.9,
   },
   tap: {
     fontFamily: 'PublicSans', fontWeight: '700', fontSize: 9,
