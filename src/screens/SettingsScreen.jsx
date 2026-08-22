@@ -26,6 +26,7 @@ import { sportForTeam } from '../sports/registry.js';
 import { confirm, notify } from '../utils/confirm.js';
 import AppHeader from '../components/AppHeader.jsx';
 import AccountSheet from '../components/AccountSheet.jsx';
+import TeamColorPicker from '../components/TeamColorPicker.jsx';
 import { ensureStatsAccess } from '../services/statsService.js';
 import { BUILD_INFO } from '../generated/buildInfo.js';
 import { formatBuildLabel } from '../shared/buildLabel.js';
@@ -97,6 +98,18 @@ export default function SettingsScreen() {
       setTimeout(() => setCopied(false), 2000);
     } catch { notify('Could not copy', 'Long-press the code to copy it manually.'); }
   }, [team]);
+
+  /**
+   * Saved immediately rather than waiting for the Save button at the bottom.
+   * That button belongs to the rules form; a swatch tap reads as a direct
+   * action, and making someone scroll to confirm a color is how you end up
+   * with teams whose color silently didn't stick.
+   */
+  const saveColor = useCallback(async (colorId) => {
+    try {
+      await updateDoc(doc(db, 'teams', team.id), { colorId: colorId || null });
+    } catch (e) { notify('Could not save the color', e.message); }
+  }, [team?.id]);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -189,6 +202,15 @@ export default function SettingsScreen() {
           {/* Rules of play are the coach's. Everyone else gets Settings for
               their own notification preferences and nothing more. */}
           {isStaff && (<>
+          <Section title="Team color"
+                   sub="Their jersey color. Shows on the scoreboard and celebrations.">
+            <TeamColorPicker
+              value={team.colorId ?? null}
+              onChange={saveColor}
+              label={null}
+            />
+          </Section>
+
           <Section title="Start from a preset"
                    sub="Overwrites the values below. Adjust anything afterward.">
             <View style={styles.chips}>

@@ -50,10 +50,10 @@ const DEFAULT_STAFF_PREFS = {
 // Teams
 // ---------------------------------------------------------------------------
 
-export async function createTeam({ name, season, division, ageGroup, sport = 'baseball', rules = {} }) {
+export async function createTeam({ name, season, division, ageGroup, sport = 'baseball', rules = {}, colorId = null }) {
   if (!SPARK_MODE) {
     const res = await httpsCallable(functions, 'createTeam')({
-      name, season, division, ageGroup, sport, rules,
+      name, season, division, ageGroup, sport, rules, colorId,
     });
     return res.data;
   }
@@ -81,6 +81,10 @@ export async function createTeam({ name, season, division, ageGroup, sport = 'ba
     ageGroup: ageGroup ?? null,
     sport,
     rules,
+    // Null is a real answer, not a missing one: it means "nobody picked", and
+    // resolveTeamColor turns it into the brand default. Every team created
+    // before this field existed reads the same way.
+    colorId: colorId || null,
     joinCode: joinCode(),
     activeGameId: null,
     archived: false,

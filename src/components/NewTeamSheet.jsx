@@ -22,6 +22,7 @@ import {
 } from 'react-native';
 
 import { createTeam } from '../services/bootstrap.js';
+import TeamColorPicker from './TeamColorPicker.jsx';
 import { SPORTS, sportKeys, getSport } from '../sports/registry.js';
 import { colors, radius, spacing, text } from '../theme/tokens.js';
 import { inputStyle } from '../theme/inputs.js';
@@ -41,6 +42,7 @@ export default function NewTeamSheet({ visible, onClose, onCreated }) {
   const [name, setName] = useState('');
   const [season, setSeason] = useState(currentSeasonGuess);
   const [preset, setPreset] = useState(null);
+  const [colorId, setColorId] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -51,7 +53,7 @@ export default function NewTeamSheet({ visible, onClose, onCreated }) {
 
   const reset = useCallback(() => {
     setName(''); setSeason(currentSeasonGuess()); setPreset(null);
-    setError(null); setSport('baseball');
+    setError(null); setSport('baseball'); setColorId(null);
   }, []);
 
   const create = useCallback(async () => {
@@ -65,13 +67,14 @@ export default function NewTeamSheet({ visible, onClose, onCreated }) {
         division: presets.find(([k]) => k === chosenPreset)?.[1] || null,
         sport,
         rules: pack.RULE_PRESETS?.[chosenPreset] || {},
+        colorId,
       });
       reset();
       // Switching to the new team is the whole point of having made it.
       onCreated?.(teamId);
     } catch (e) { setError(e.message); }
     setBusy(false);
-  }, [name, season, sport, chosenPreset, presets, pack, onCreated, reset]);
+  }, [name, season, sport, colorId, chosenPreset, presets, pack, onCreated, reset]);
 
   if (!visible) return null;
 
@@ -113,6 +116,14 @@ export default function NewTeamSheet({ visible, onClose, onCreated }) {
             <TextInput value={season} onChangeText={setSeason} style={inputStyle}
               autoCapitalize="words" placeholder="Fall 2026"
               placeholderTextColor="#A0A8B8" />
+
+            <View style={{ marginTop: spacing.md }}>
+              <TeamColorPicker value={colorId} onChange={setColorId} />
+              <Text style={styles.hint}>
+                Their jersey color. Shows up on the scoreboard and celebrations.
+                Changeable later in Settings.
+              </Text>
+            </View>
 
             {presets.length > 0 && (
               <>

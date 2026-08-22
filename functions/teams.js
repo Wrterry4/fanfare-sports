@@ -16,6 +16,7 @@
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { FieldValue } from 'firebase-admin/firestore';
 import { db } from './firebase-init.js';
+import { isTeamColorId } from './shared/common/teamColors.js';
 
 
 const requireAuth = (req) => {
@@ -40,6 +41,7 @@ export const createTeam = onCall(async (req) => {
     name, season, division, ageGroup,
     sport = 'baseball',
     rules = {},
+    colorId = null,
     orgId: existingOrgId,
     orgName,
   } = req.data;
@@ -83,6 +85,10 @@ export const createTeam = onCall(async (req) => {
       // Stored so a second sport can land without migrating existing teams.
       sport,
       rules,
+      // Validated against the shared list rather than trusted: this is a
+      // client-supplied value that ends up painting the UI, and an unknown id
+      // resolves to the brand default anyway. Null means nobody picked.
+      colorId: isTeamColorId(colorId) ? colorId : null,
       joinCode: joinCode(),
       activeGameId: null,
       archived: false,

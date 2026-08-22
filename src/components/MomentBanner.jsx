@@ -55,10 +55,15 @@ const EXIT_MS = 260;
 const PULSE_DELAY_MS = 380;
 
 /**
- * @param moment  { text, tone } or null — a new object (even with identical
- *                text) is what triggers the animation to replay
+ * @param moment     { text, tone } or null — a new object (even with identical
+ *                   text) is what triggers the animation to replay
+ * @param teamColor  { fill, onFill } from resolveTeamColor, optional. Only
+ *                   'good' takes it: 'big' stays stadium gold because a home
+ *                   run should look like a home run on every team in the
+ *                   league, and 'bad' stays red because a team's own color
+ *                   announcing its own bad news reads wrong.
  */
-export default function MomentBanner({ moment }) {
+export default function MomentBanner({ moment, teamColor }) {
   const opacity = useRef(new Animated.Value(0)).current;
   const scale = useRef(new Animated.Value(0.5)).current;
   const tilt = useRef(new Animated.Value(0)).current;
@@ -71,7 +76,10 @@ export default function MomentBanner({ moment }) {
   const pulseTimer = useRef(null);
   const loop = useRef(null);
 
-  const tone = TONE_COLORS[moment?.tone] || TONE_COLORS.good;
+  const base = TONE_COLORS[moment?.tone] || TONE_COLORS.good;
+  const tone = moment?.tone === 'good' && teamColor?.fill
+    ? { bg: teamColor.fill, fg: teamColor.onFill }
+    : base;
   const weight = TONE_WEIGHT[moment?.tone] || TONE_WEIGHT.good;
 
   useEffect(() => {

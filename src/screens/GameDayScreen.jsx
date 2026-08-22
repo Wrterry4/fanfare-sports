@@ -22,6 +22,7 @@ import AccountSheet from '../components/AccountSheet.jsx';
 import SoundboardSheet from '../components/SoundboardSheet.jsx';
 import MomentBanner from '../components/MomentBanner.jsx';
 import { findNewMoment } from '../shared/momentDetection.js';
+import { resolveTeamColor } from '../shared/teamColors.js';
 import { checkGameReadiness } from '../shared/gameReadiness.js';
 import PlayerCardScreen from './PlayerCardScreen.jsx';
 import Scoreboard from '../components/Scoreboard.jsx';
@@ -330,7 +331,7 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
       {/* Absolutely positioned and non-interactive — see MomentBanner.jsx.
           Placed first so it overlays everything below regardless of where
           in the tree it sits. */}
-      <MomentBanner moment={moment} />
+      <MomentBanner moment={moment} teamColor={resolveTeamColor(team)} />
 
       {/* Inning, count and outs sit in the header's right slot — right
           justified, and one bar fewer on a screen where nothing scrolls. */}

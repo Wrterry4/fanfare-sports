@@ -13,6 +13,7 @@ import React, { memo } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { colors, radius, spacing, text } from '../theme/tokens.js';
+import { resolveTeamColor } from '../shared/teamColors.js';
 
 export const HEADER_HEIGHT = 58;
 
@@ -31,6 +32,8 @@ function Hamburger({ color = '#FFF' }) {
  * page body — so the navy bar is exactly HEADER_HEIGHT on every tab.
  */
 function AppHeader({ team, onMenu, right, onBack, centerTitle }) {
+  const teamColor = resolveTeamColor(team);
+
   return (
     <View style={styles.wrap}>
       <View style={styles.bar}>
@@ -68,6 +71,18 @@ function AppHeader({ team, onMenu, right, onBack, centerTitle }) {
         <View style={styles.rightSlot}>{right ?? null}</View>
       </View>
 
+      {/*
+        The team's color, as a stripe under the bar on every screen.
+
+        A stripe rather than repainting the bar itself: the navy bar is the
+        one thing that's constant across sports and screens, and a maroon or
+        gold header would put user-chosen color behind white text that was
+        never measured against it. A 3pt band carries the identity, is
+        visible at a glance from the stands, and can't make anything
+        unreadable because nothing sits on it.
+      */}
+      <View style={[styles.stripe, { backgroundColor: teamColor.fill }]} />
+
     </View>
   );
 }
@@ -101,6 +116,7 @@ export function HeaderButton({ label, onPress, active }) {
 
 const styles = StyleSheet.create({
   wrap: { backgroundColor: colors.navy },
+  stripe: { height: 3, width: '100%' },
   bar: {
     height: HEADER_HEIGHT,
     flexDirection: 'row', alignItems: 'center',
