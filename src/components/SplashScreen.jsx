@@ -24,29 +24,16 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
-import Svg, { Rect } from 'react-native-svg';
+import { StyleSheet, Animated, Easing, useWindowDimensions } from 'react-native';
 
-import { colors, spacing } from '../theme/tokens.js';
+import { FanfareLockup } from './FanfareLogo.jsx';
+import { colors } from '../theme/tokens.js';
 
 /** Long enough to register as intentional, short enough not to be a toll. */
 export const MIN_VISIBLE_MS = 1100;
 /** After this, something is wrong and the app underneath should be visible. */
 export const MAX_VISIBLE_MS = 6000;
 const FADE_MS = 320;
-
-/** The Fanfare F: white stem, gold top arm, blue middle arm. */
-export function FanfareMark({ size = 96 }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 192 192">
-      {/* Stem first, arms over it — the arms are the colored part of the
-          letter and must not be interrupted by the stem's rounded cap. */}
-      <Rect x="66" y="38" width="28" height="118" rx="14" fill="#FFFFFF" />
-      <Rect x="66" y="38" width="78" height="28" rx="14" fill="#F59E0B" />
-      <Rect x="66" y="80" width="62" height="28" rx="14" fill="#2563EB" />
-    </Svg>
-  );
-}
 
 /**
  * @param onHidden  called once the fade finishes, so the parent can unmount it
@@ -80,18 +67,27 @@ export default function SplashScreen({ ready, onHidden }) {
 
   const translateY = enter.interpolate({ inputRange: [0, 1], outputRange: [14, 0] });
 
+  /**
+   * The lockup is horizontal, so its width — not the screen's height — is what
+   * can overflow. "FANFARE SPORTS" beside an 84px mark needs roughly 375pt at
+   * full size, which is exactly a small phone's entire width. Scaling against
+   * the measured width means a 320pt device shrinks the whole lockup
+   * proportionally instead of clipping the wordmark or wrapping it.
+   */
+  const { width } = useWindowDimensions();
+  // 400 is the lockup's measured natural width at scale 1: an 84pt mark, a
+  // 14pt gap, and "FANFARE SPORTS" set at 30pt. Measured against a render
+  // rather than guessed — the first estimate was 340 and clipped the wordmark
+  // on a 375pt phone.
+  const scale = Math.min(1.15, Math.max(0.7, (width - 40) / 400));
+
   // No pointerEvents="none": while this is up it should swallow input. A tap
   // landing on an invisible button underneath is worse than one that does
   // nothing, and it unmounts the moment the fade completes.
   return (
     <Animated.View style={[styles.wrap, { opacity }]}>
       <Animated.View style={{ opacity: enter, transform: [{ translateY }] }}>
-        <View style={styles.markRow}>
-          <FanfareMark size={104} />
-        </View>
-        <Text style={styles.name}>FANFARE</Text>
-        <Text style={styles.sport}>SPORTS</Text>
-        <Text style={styles.slogan}>Never miss a play.</Text>
+        <FanfareLockup scale={scale} />
       </Animated.View>
     </Animated.View>
   );
@@ -102,22 +98,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: colors.navy,
     alignItems: 'center', justifyContent: 'center',
+    padding: 20,
     zIndex: 9999,
-  },
-  markRow: { alignItems: 'center', marginBottom: spacing.lg },
-  name: {
-    fontFamily: 'Archivo', fontWeight: '900', fontSize: 38,
-    letterSpacing: 2, color: '#FFFFFF', textAlign: 'center',
-  },
-  // Set apart rather than run together: the mark is an F, and "FANFARE"
-  // carrying the weight lets "SPORTS" sit under it as a qualifier.
-  sport: {
-    fontFamily: 'Archivo', fontWeight: '700', fontSize: 15,
-    letterSpacing: 6.5, color: colors.gold, textAlign: 'center',
-    marginTop: 2,
-  },
-  slogan: {
-    fontFamily: 'PublicSans', fontWeight: '400', fontSize: 13,
-    color: '#94A3B8', textAlign: 'center', marginTop: spacing.lg,
   },
 });
