@@ -368,6 +368,7 @@ export default function SettingsScreen() {
               value={team.secondaryColorId ?? null}
               onChange={(id) => saveColor('secondaryColorId', id)}
               label="SECONDARY"
+              noneLabel="None"
             />
           </Section>
           )}

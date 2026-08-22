@@ -203,5 +203,40 @@ group('Primary and secondary');
       === '#1E3A8A');
 }
 
+group('Clearing a color returns the app to its default look');
+{
+  const chosen = resolveTeamColor({ colorId: 'crimson', secondaryColorId: 'gold' });
+  const cleared = resolveTeamColor({ colorId: null, secondaryColorId: null });
+  const never = resolveTeamColor({});
+
+  ok('clearing gives back the brand blue', cleared.fill === DEFAULT_TEAM_COLOR.fill);
+  ok('and is identical to a team that never chose', cleared.fill === never.fill);
+  ok('the surface goes back too', cleared.surface === never.surface);
+  ok('the secondary clears with it', cleared.secondary.fill === DEFAULT_TEAM_COLOR.fill);
+  ok('which is genuinely different from the chosen state', chosen.surface !== cleared.surface);
+
+  // Clearing only the secondary must leave the primary alone — they are two
+  // independent fields, and a shared clear button would be a nasty surprise.
+  const primaryOnly = resolveTeamColor({ colorId: 'crimson', secondaryColorId: null });
+  ok('clearing the secondary keeps the primary', primaryOnly.fill === '#B91C1C');
+  ok('and the secondary falls back to the primary, not to blue',
+    primaryOnly.secondary.fill === '#B91C1C');
+}
+
+group('Colors belong to the team, not the sport');
+{
+  // The picker is gated on staff, never on sport. A basketball team must
+  // resolve exactly like a baseball one — this is the assertion that catches
+  // anyone later "helpfully" branching this on team.sport.
+  const ball = resolveTeamColor({ sport: 'baseball', colorId: 'forest', secondaryColorId: 'gold' });
+  const hoops = resolveTeamColor({ sport: 'basketball', colorId: 'forest', secondaryColorId: 'gold' });
+  const future = resolveTeamColor({ sport: 'lacrosse', colorId: 'forest', secondaryColorId: 'gold' });
+
+  ok('basketball resolves the same primary', hoops.fill === ball.fill);
+  ok('basketball resolves the same secondary', hoops.secondary.fill === ball.secondary.fill);
+  ok('basketball gets the same surface tint', hoops.surface === ball.surface);
+  ok('a sport that does not exist yet works too', future.surface === ball.surface);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
