@@ -41,18 +41,20 @@
  * entry rather than trusting it.
  */
 
-import { onColor, mix } from './contrast.js';
+import { onColor, mix, contrastRatio, MIN_AA_LARGE } from './contrast.js';
 
 /**
  * How much team color goes into the page background.
  *
- * Tuned by measurement, not taste: at 0.10 the tint is clearly visible on
- * every hue while the worst-case body-text pair in the set stays above 6:1,
- * comfortably past the 4.5 AA bar. Raising this is the one change here most
- * likely to quietly break readability, which is why the tests assert the
- * resulting ratios and not just this number.
+ * Tuned by measurement, not taste. Measured worst cases across the whole
+ * palette: 0.14 gives 5.42:1 on secondary text, 0.16 gives 5.20:1, 0.18 gives
+ * 4.96:1. All pass AA, but 0.18 leaves almost no margin for a future color, so
+ * 0.16 is the last comfortable step — clearly a colored screen, still a
+ * readable one. Raising this is the change most likely to quietly break
+ * readability, which is why the tests assert the resulting RATIOS and not just
+ * this number.
  */
-export const SURFACE_TINT = 0.10;
+export const SURFACE_TINT = 0.16;
 
 /** The brand background a tint is mixed into — chalk, from brand.js. */
 const BASE_SURFACE = '#F8FAFC';
@@ -127,7 +129,26 @@ export function resolveTeamColor(team) {
     ...primary,
     secondary,
     surface: mix(BASE_SURFACE, primary.fill, SURFACE_TINT),
+    numberOn: numberColor(primary, secondary),
   };
+}
+
+/**
+ * The color a jersey number is printed in.
+ *
+ * The secondary, when you can actually read it on the primary — which is the
+ * point of picking two. But a team can legitimately choose navy and royal, or
+ * leave the secondary unset so it falls back to the primary itself, and then
+ * the number would be invisible on the shirt. Anything under the large-text
+ * bar falls back to the primary's own proven onFill.
+ *
+ * MIN_AA_LARGE rather than MIN_AA because a jersey number is exactly what that
+ * threshold exists for: two or three digits, bold, at display size.
+ */
+export function numberColor(primary, secondary) {
+  const candidate = secondary?.fill;
+  if (candidate && contrastRatio(candidate, primary.fill) >= MIN_AA_LARGE) return candidate;
+  return primary.onFill;
 }
 
 /** The page background for a team, on its own — see the header for why a tint. */

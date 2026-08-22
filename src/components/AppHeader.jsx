@@ -34,18 +34,37 @@ function Hamburger({ color = '#FFF' }) {
 function AppHeader({ team, onMenu, right, onBack, centerTitle }) {
   const teamColor = resolveTeamColor(team);
 
+  /**
+   * The bar itself takes the team's color.
+   *
+   * This started as a 3pt stripe under a permanently-navy bar, on the
+   * reasoning that user-chosen color behind white text was never measured.
+   * That reasoning was sound and the conclusion was too timid: every color in
+   * the palette ships an `onFill` that IS measured against it, and the tests
+   * prove all 22 clear AA. So the bar can be the team's color as long as
+   * everything on it uses onFill rather than a hardcoded white.
+   *
+   * Which is the difference between an app with a colored accent and an app
+   * that belongs to the team.
+   */
+  const bg = teamColor.fill;
+  const fg = teamColor.onFill;
+  // Secondary text and the pressed-state wash have to sit on the team color
+  // too, so they're derived from the foreground rather than fixed greys.
+  const dim = fg === '#FFFFFF' ? 'rgba(255,255,255,0.72)' : 'rgba(15,23,42,0.66)';
+
   return (
-    <View style={styles.wrap}>
+    <View style={[styles.wrap, { backgroundColor: bg }]}>
       <View style={styles.bar}>
         {onBack ? (
           <Pressable onPress={onBack} style={styles.iconBtn} hitSlop={10}
             accessibilityRole="button" accessibilityLabel="Back">
-            <Text style={styles.back}>‹</Text>
+            <Text style={[styles.back, { color: fg }]}>‹</Text>
           </Pressable>
         ) : (
           <Pressable onPress={onMenu} style={styles.iconBtn} hitSlop={10}
             accessibilityRole="button" accessibilityLabel="Account menu">
-            <Hamburger />
+            <Hamburger color={fg} />
           </Pressable>
         )}
 
@@ -53,17 +72,17 @@ function AppHeader({ team, onMenu, right, onBack, centerTitle }) {
           // Absolutely positioned so a long name centres on the BAR, not on
           // the space left between the buttons.
           <View style={styles.centerWrap} pointerEvents="none">
-            <Text style={styles.centerText} numberOfLines={1}>{centerTitle}</Text>
+            <Text style={[styles.centerText, { color: fg }]} numberOfLines={1}>{centerTitle}</Text>
           </View>
         ) : (
           <View style={styles.titles}>
-            <Text style={styles.name} numberOfLines={1}>
+            <Text style={[styles.name, { color: fg }]} numberOfLines={1}>
               {team?.name ?? 'Fanfare Sports'}
             </Text>
             {/* Season only. The division is a league setting, not an
                 identity — it belongs in Settings, not on every screen. */}
             {team?.season ? (
-              <Text style={styles.season} numberOfLines={1}>{team.season}</Text>
+              <Text style={[styles.season, { color: dim }]} numberOfLines={1}>{team.season}</Text>
             ) : null}
           </View>
         )}
@@ -71,24 +90,13 @@ function AppHeader({ team, onMenu, right, onBack, centerTitle }) {
         <View style={styles.rightSlot}>{right ?? null}</View>
       </View>
 
-      {/*
-        The team's color, as a stripe under the bar on every screen.
-
-        A stripe rather than repainting the bar itself: the navy bar is the
-        one thing that's constant across sports and screens, and a maroon or
-        gold header would put user-chosen color behind white text that was
-        never measured against it. A 3pt band carries the identity, is
-        visible at a glance from the stands, and can't make anything
-        unreadable because nothing sits on it.
-      */}
-      <View style={styles.stripeRow}>
-        <View style={[styles.stripe, { backgroundColor: teamColor.fill }]} />
-        {/* The second colour only appears when it differs — a team that picked
-            one colour gets a clean single band rather than a seam. */}
-        {teamColor.secondary?.fill !== teamColor.fill && (
-          <View style={[styles.stripeSecondary, { backgroundColor: teamColor.secondary.fill }]} />
-        )}
-      </View>
+      {/* Now that the bar carries the primary, the band below is where the
+          SECOND color goes — the trim line on a jersey. A team that picked one
+          color gets no band at all rather than a stripe of the same color
+          repeating itself under a bar that already is that color. */}
+      {teamColor.secondary?.fill !== teamColor.fill && (
+        <View style={[styles.stripe, { backgroundColor: teamColor.secondary.fill }]} />
+      )}
 
     </View>
   );
@@ -123,9 +131,7 @@ export function HeaderButton({ label, onPress, active }) {
 
 const styles = StyleSheet.create({
   wrap: { backgroundColor: colors.navy },
-  stripeRow: { width: '100%' },
-  stripe: { height: 3, width: '100%' },
-  stripeSecondary: { height: 2, width: '100%' },
+  stripe: { height: 4, width: '100%' },
   bar: {
     height: HEADER_HEIGHT,
     flexDirection: 'row', alignItems: 'center',

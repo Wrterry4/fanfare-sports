@@ -82,7 +82,10 @@ export default function NewTeamSheet({ visible, onClose, onCreated }) {
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
       <View style={styles.sheet}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.kav}
+        >
           <View style={styles.handle} />
           <Text style={styles.title}>New team</Text>
           <Text style={styles.sub}>
@@ -178,7 +181,12 @@ const styles = StyleSheet.create({
     ...text.body, fontSize: 12.5, color: colors.pencil,
     marginTop: 4, marginBottom: spacing.md, lineHeight: 17,
   },
-  body: { flexGrow: 0 },
+  // flexShrink, NOT flexGrow: 0. With flexGrow the list sized itself to its
+  // content and simply overflowed the sheet, so everything past the rule
+  // presets was cut off with no way to reach it. Shrinking lets the sheet's
+  // maxHeight bound it, which is what makes a ScrollView scroll.
+  kav: { flexShrink: 1 },
+  body: { flexShrink: 1 },
   flex: { flex: 1 },
   label: { ...text.label, color: colors.pencil, marginBottom: 5 },
   hint: { ...text.body, fontSize: 11.5, color: colors.pencil, marginBottom: 7, lineHeight: 16 },

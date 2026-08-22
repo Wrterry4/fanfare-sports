@@ -167,7 +167,7 @@ group('The surface is a tint, not the team color');
 {
   // If this ever stops being true, someone has raised SURFACE_TINT far enough
   // that the app has quietly become a different design per team.
-  ok('the tint is a small fraction, not a wash', SURFACE_TINT <= 0.15);
+  ok('the tint is a fraction, not a wash', SURFACE_TINT <= 0.20);
 
   for (const c of TEAM_COLORS) {
     const surface = teamSurface({ colorId: c.id });

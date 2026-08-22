@@ -502,6 +502,7 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
             <Field
               state={state}
               jerseyFor={jerseyFor}
+              teamColors={teamColors}
               onPressRunner={(base, pid) => canScore && pid && setRunnerSheet({ base, playerId: pid })}
               interactive={canScore}
               size={fieldSize}

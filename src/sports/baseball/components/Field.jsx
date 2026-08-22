@@ -17,31 +17,96 @@ import { baseballTheme } from '../theme.js';
 
 const BASE_XY = { 1: [165, 105], 2: [100, 40], 3: [35, 105] };
 
-function Base({ base, runner, jersey, onPress }) {
-  const [x, y] = BASE_XY[base];
-  const occupied = !!runner;
+/** Standalone renders — a test, a preview — still need a shirt to draw. */
+const DEFAULT_JERSEY = { fill: colors.clay, onFill: '#FFFFFF', numberOn: '#FFFFFF' };
+
+/**
+ * A jersey, drawn around its centre so it can be dropped on any base.
+ *
+ * Body, then two sleeves, then the collar notch cut back in the shirt color.
+ * The proportions are a youth tee rather than a tapered adult jersey — wide
+ * shoulders, short body — because at 34px the number has to fit inside it and
+ * a realistic silhouette leaves no room.
+ */
+function Jersey({ cx, cy, w = 34, fill, stroke, numberColor, number }) {
+  const h = w * 0.95;
+  const x = cx - w / 2;
+  const y = cy - h / 2;
+  const s = w / 34;   // everything below is authored at w=34
+
   return (
     <G>
-      <Rect
-        x={x - 13} y={y - 13} width={26} height={26} rx={4}
-        transform={`rotate(45 ${x} ${y})`}
-        fill={occupied ? colors.clay : colors.card}
-        stroke={occupied ? colors.clay : colors.navy}
-        strokeWidth={2.5}
+      {/* Sleeves first so the body's rounded corners sit over them. */}
+      <Path
+        d={`M${x - 4 * s} ${y + 4 * s}
+            L${x + 8 * s} ${y}
+            L${x + 8 * s} ${y + 12 * s}
+            L${x - 4 * s} ${y + 11 * s} Z`}
+        fill={fill} stroke={stroke} strokeWidth={1.5 * s} strokeLinejoin="round"
       />
-      {occupied && (
-        <SvgText
-          x={x} y={y + 5} fontSize={14} fontWeight="900"
-          fill={colors.white} textAnchor="middle"
-        >
-          {jersey ?? '•'}
-        </SvgText>
-      )}
+      <Path
+        d={`M${x + w + 4 * s} ${y + 4 * s}
+            L${x + w - 8 * s} ${y}
+            L${x + w - 8 * s} ${y + 12 * s}
+            L${x + w + 4 * s} ${y + 11 * s} Z`}
+        fill={fill} stroke={stroke} strokeWidth={1.5 * s} strokeLinejoin="round"
+      />
+
+      <Rect
+        x={x} y={y} width={w} height={h} rx={5 * s}
+        fill={fill} stroke={stroke} strokeWidth={1.5 * s}
+      />
+
+      {/* Collar — a notch of the field showing through the shoulders. */}
+      <Path
+        d={`M${cx - 6 * s} ${y}
+            Q${cx} ${y + 7 * s} ${cx + 6 * s} ${y}Z`}
+        fill={stroke} opacity={0.55}
+      />
+
+      <SvgText
+        x={cx} y={cy + 6 * s} fontSize={16 * s} fontWeight="900"
+        fill={numberColor} textAnchor="middle"
+      >
+        {number}
+      </SvgText>
     </G>
   );
 }
 
-function Diamond({ state, bases: basesProp, jerseyFor, onPressRunner, size = 250, interactive = true }) {
+/**
+ * An empty base stays a base — the rotated square everyone who has kept a book
+ * already reads. Only an OCCUPIED one becomes a jersey, which is what makes
+ * "who is on second" answerable at a glance from the bleachers.
+ */
+function Base({ base, runner, jersey, teamColors }) {
+  const [x, y] = BASE_XY[base];
+
+  if (!runner) {
+    return (
+      <Rect
+        x={x - 11} y={y - 11} width={22} height={22} rx={3}
+        transform={`rotate(45 ${x} ${y})`}
+        fill={colors.card} stroke={colors.navy} strokeWidth={2.5}
+      />
+    );
+  }
+
+  return (
+    <Jersey
+      cx={x} cy={y}
+      fill={teamColors.fill}
+      stroke={teamColors.onFill === '#FFFFFF' ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.2)'}
+      numberColor={teamColors.numberOn}
+      number={jersey ?? '•'}
+    />
+  );
+}
+
+function Diamond({
+  state, bases: basesProp, jerseyFor, onPressRunner,
+  teamColors = DEFAULT_JERSEY, size = 250, interactive = true,
+}) {
   // Takes the whole game state now, because the shared screen shouldn't have
   // to know that baseball tracks bases in order to pass them in. The explicit
   // `bases` prop is kept so this stays usable on its own in a test.
@@ -96,6 +161,7 @@ function Diamond({ state, bases: basesProp, jerseyFor, onPressRunner, size = 250
             base={b}
             runner={bases[b]}
             jersey={bases[b] ? jerseyFor(bases[b]) : null}
+            teamColors={teamColors}
           />
         ))}
 
