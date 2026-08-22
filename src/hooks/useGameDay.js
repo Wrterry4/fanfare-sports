@@ -15,9 +15,9 @@ import {
   db, doc, collection, query, where, orderBy, limit, onSnapshot, getDoc, setDoc,
 } from '../services/firebase';
 import { useActiveTeam } from './ActiveTeam.jsx';
-import { buildGameConfig } from '../sports/baseball/config.js';
+import { sportForTeam } from '../sports/registry.js';
+import { ensureStatsAccess } from '../services/statsService.js';
 import { isGame } from '../shared/eventTypes.js';
-import { RULE_PRESETS, DEFAULT_RULES } from '../sports/baseball/rules.js';
 
 export function useGameDay() {
   // Selected in the account menu; persists across launches.
@@ -103,12 +103,35 @@ export function useGameDay() {
     }, (e) => setError(e));
   }, [team?.id]);
 
+  /**
+   * Silent one-time repair for teams whose access lists predate the triggers
+   * that maintain them. Runs at most once per team — see ensureStatsAccess.
+   * Placed here rather than in a screen so it covers every way into a team.
+   */
+  useEffect(() => {
+    if (!team?.id) return;
+    // The function itself re-checks staff server-side; this only avoids a
+    // guaranteed permission-denied round trip for everyone else.
+    ensureStatsAccess(team, true);
+  }, [team?.id, team?.statsAccessVersion]);
+
   // ---- engine inputs ------------------------------------------------------
+  /**
+   * The team's sport, not baseball's.
+   *
+   * This hook used to import buildGameConfig and RULE_PRESETS straight from
+   * the baseball pack, which meant a basketball team was handed a baseball
+   * config — no periodScores, no onCourt — and the first screen that read
+   * state.periodScores.away crashed on undefined.
+   */
+  const sport = useMemo(() => sportForTeam(team), [team?.sport]);
+
   const rules = useMemo(() => {
     if (game?.rulesSnapshot) return game.rulesSnapshot;   // frozen at creation
     if (team?.rules) return team.rules;
-    return RULE_PRESETS.kidPitch10U ?? DEFAULT_RULES;
-  }, [game?.rulesSnapshot, team?.rules]);
+    // Each pack names its own fallback; there is no cross-sport default.
+    return sport.DEFAULT_RULES;
+  }, [game?.rulesSnapshot, team?.rules, sport]);
 
   // Lineup falls back to the full roster in jersey order, which is what
   // continuous batting order means anyway — and it lets a game be scored
@@ -119,8 +142,8 @@ export function useGameDay() {
       ? game.lineup
       : roster.map((p, i) => ({ playerId: p.playerId, battingOrder: i + 1,
                                 position: p.primaryPosition }));
-    return buildGameConfig({ ...game, lineup });
-  }, [game, roster]);
+    return sport.buildGameConfig({ ...game, lineup });
+  }, [game, roster, sport]);
 
   const names = useMemo(() => {
     const map = Object.fromEntries(

@@ -7,13 +7,14 @@
 
 import React, { useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 
 import { useAuth } from '../hooks/AuthProvider.jsx';
 import { useTeams } from '../hooks/useTeams.js';
+import { useActiveTeam } from '../hooks/ActiveTeam.jsx';
 import { useMyRole } from '../hooks/useMyRole.js';
+import { useBottomInset } from '../hooks/useBottomInset';
 import { navigate } from './navigationRef.js';
 import { colors } from '../theme/tokens.js';
 
@@ -48,23 +49,35 @@ const TABS = [
 ];
 
 function Tabs() {
-  // Fans see the game and the schedule. Not the roster — that would be a
-  // directory of other people's children — and not chat or team settings.
-  const { isFan } = useMyRole();
-  // Hard-coding paddingBottom was the bug: on an installed PWA the browser
-  // reports a bottom inset that a fixed number can't account for, so the bar
-  // ran off the bottom of the viewport. Measure it instead.
-  const insets = useSafeAreaInsets();
-  // An installed PWA reports a bottom inset that lags the real one — iOS
-  // resolves env(safe-area-inset-bottom) after the first paint, so a bar sized
-  // from it on mount ends up short and the labels sit under the home
-  // indicator.
+  // Fans see the game, the schedule, the roster and settings.
   //
-  // A floor of 20 covers the gesture bar on every current iPhone; on hardware
-  // that genuinely has no inset it's a little breathing room rather than a
-  // clipped label.
-  const bottomPad = Math.max(insets.bottom, 20);
-  const barHeight = 54 + bottomPad;
+  // Settings is on the list because notifications live there, and a
+  // notification is the entire reason a grandparent installed this. Without it
+  // they had no way to grant permission or send themselves a test — the one
+  // feature they came for was unreachable. The screen itself hides the join
+  // code and the rules editor from anyone who isn't staff.
+  //
+  // Messages stays closed: the rules block fans from team chat, so the tab
+  // would open onto nothing.
+  const { isFan } = useMyRole();
+  /**
+   * The real inset, not a guess.
+   *
+   * This used to floor at 20px to cover the home indicator, which put 20px of
+   * dead space under the bar on hardware with no inset and still wasn't
+   * enough on an iPhone that reports 34. useBottomInset reads
+   * env(safe-area-inset-bottom) directly on web and the OS value on native,
+   * so the bar sits exactly as low as it can without the labels running into
+   * the indicator.
+   *
+   * The clipping you'd have seen before this was NOT caused here, though —
+   * see the note in scripts/finalize-web.mjs about -webkit-fill-available
+   * making #root taller than the viewport. Both changes are needed.
+   */
+  const bottomInset = useBottomInset();
+  // 4px keeps the labels off a hard screen edge on a device with no inset.
+  const bottomPad = bottomInset > 0 ? bottomInset : 4;
+  const barHeight = 52 + bottomPad;
 
   return (
     <Tab.Navigator
@@ -96,7 +109,8 @@ function Tabs() {
         tabBarIconStyle: { marginTop: 4, marginBottom: 0 },
       }}
     >
-      {TABS.filter(([name]) => !isFan || name === 'GameDay' || name === 'Schedule')
+      {TABS.filter(([name]) => !isFan
+                    || ['GameDay', 'Schedule', 'Roster', 'Settings'].includes(name))
         .map(([name, title, Icon, Component]) => (
         <Tab.Screen key={name} name={name} component={Component}
           options={{
@@ -120,10 +134,25 @@ function PendingInviteHandler({ destination, onHandled }) {
 export default function RootNavigator() {
   const { loading, signedIn, pendingDestination, clearPendingDestination } = useAuth();
   const { teams, loading: teamsLoading } = useTeams();
+  /**
+   * The team list arriving isn't the same moment as knowing WHICH team is
+   * active — that also needs the stored preference read from AsyncStorage,
+   * which is a second, independent async operation with no ordering
+   * guarantee against the Firestore fetch above. Gating only on `teamsLoading`
+   * let the navigator start rendering real screens the instant the team list
+   * arrived, sometimes before the stored preference had loaded — during that
+   * gap `team` (from useActiveTeam) was resolving to an arbitrary team, and
+   * several screens read it without checking its own loading flag, so the
+   * wrong team's name and content would flash before correcting a moment
+   * later. Waiting on activeTeamLoading here closes that window at the one
+   * place all of those screens share, rather than needing each one fixed
+   * individually.
+   */
+  const { loading: activeTeamLoading } = useActiveTeam();
 
   const needsSetup = signedIn && !teamsLoading && (teams?.length ?? 0) === 0;
 
-  if (loading || (signedIn && teamsLoading)) {
+  if (loading || (signedIn && (teamsLoading || activeTeamLoading))) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator color={colors.primary} />

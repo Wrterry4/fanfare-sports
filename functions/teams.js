@@ -14,9 +14,9 @@
  */
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
+import { db } from './firebase-init.js';
 
-const db = getFirestore();
 
 const requireAuth = (req) => {
   if (!req.auth?.uid) throw new HttpsError('unauthenticated', 'Sign in first.');

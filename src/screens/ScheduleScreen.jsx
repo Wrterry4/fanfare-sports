@@ -8,7 +8,7 @@
  * often has half the details and shouldn't be blocked on the rest.
  */
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View, Text, TextInput, Pressable, StyleSheet, ScrollView,
   ActivityIndicator, KeyboardAvoidingView, Platform,
@@ -17,10 +17,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { db, collection, query, orderBy, onSnapshot } from '../services/firebase';
 import { useGameDay } from '../hooks/useGameDay.js';
-import { createEvent, updateEvent, deleteEvent } from '../services/eventService.js';
+import { createEvent, updateEvent, deleteEvent, setRsvp } from '../services/eventService.js';
 import RsvpRow from '../components/RsvpRow.jsx';
+import AttendanceSheet, { AttendanceBar } from '../components/AttendanceSheet.jsx';
+import { useRsvps } from '../hooks/useRsvps.js';
+import { useMyRole } from '../hooks/useMyRole.js';
+import { sportForTeam } from '../sports/registry.js';
+import { splitUpcomingPast, groupEventsByDate, dateKey } from '../shared/scheduleFilters.js';
+import MonthCalendar from '../components/MonthCalendar.jsx';
 import {
-  EVENT_TYPES, EVENT_ORDER, typeOf, isGame, eventTitle, fieldsFor,
+  EVENT_TYPES, EVENT_ORDER, typeOf, isGame, eventTitle, fieldsFor, venueOf,
 } from '../shared/eventTypes.js';
 import { confirm, notify } from '../utils/confirm.js';
 import { DateField, TimeField, combineDateTime, splitDateTime } from '../components/DateField';
@@ -34,7 +40,7 @@ const emptyForm = () => ({
   type: EVENT_TYPES.GAME,
   title: '', opponent: '', homeOrAway: 'home',
   dateStr: splitDateTime(new Date()).dateStr, timeStr: '17:30',
-  park: '', field: '', notes: '',
+  location: '', field: '', notes: '',
 });
 
 export default function ScheduleScreen() {
@@ -43,6 +49,15 @@ export default function ScheduleScreen() {
   const [adding, setAdding] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [menu, setMenu] = useState(false);
+  /**
+   * Defaults to 'calendar' — it's the primary control now (see
+   * ScheduleViewSwitch), and a coach opening Schedule most often wants "what
+   * does this month look like," not a flat list. Upcoming and Past are one
+   * tap away for the narrower question.
+   */
+  const [view, setView] = useState('calendar');
+  const [calendarMonth, setCalendarMonth] = useState(() => startOfMonth(new Date()));
+  const [selectedDate, setSelectedDate] = useState(null);
 
   useEffect(() => {
     if (!team?.id) return undefined;
@@ -50,6 +65,11 @@ export default function ScheduleScreen() {
     return onSnapshot(q, (snap) =>
       setGames(snap.docs.map((d) => ({ id: d.id, ...d.data() }))), () => setGames([]));
   }, [team?.id]);
+
+  const { upcoming, past } = useMemo(() => splitUpcomingPast(games), [games]);
+  const eventsByDate = useMemo(() => groupEventsByDate(games), [games]);
+  const eventDateKeys = useMemo(() => new Set(Object.keys(eventsByDate)), [eventsByDate]);
+  const selectedDateEvents = selectedDate ? (eventsByDate[dateKey(selectedDate)] || []) : [];
 
   const remove = useCallback(async (g) => {
     const ok = await confirm({
@@ -77,31 +97,80 @@ export default function ScheduleScreen() {
       <AppHeader
         team={team}
         onMenu={() => setMenu(true)}
-        right={<HeaderButton label={adding ? 'DONE' : '+ GAME'} active={adding}
+        right={<HeaderButton label={adding ? 'DONE' : '+ EVENT'} active={adding}
                  onPress={() => setAdding((a) => !a)} />}
       />
       <AccountSheet visible={menu} onClose={() => setMenu(false)} />
+
+      <ScheduleViewSwitch value={view} onChange={setView} />
 
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
           {adding && <AddGameForm team={team} rules={rules} onDone={() => setAdding(false)} />}
 
           {games.length === 0 && !adding && (
-            <Text style={styles.empty}>No games yet. Tap + GAME to add one.</Text>
+            <Text style={styles.empty}>
+              Nothing scheduled yet. Tap + EVENT to add a game, practice, or
+              anything else on the calendar.
+            </Text>
           )}
 
-          {games.map((g) => (
-            <GameRow
-              key={g.id}
-              game={g}
-              team={team}
-              roster={roster}
-              expanded={expandedId === g.id}
-              onToggle={() => setExpandedId(expandedId === g.id ? null : g.id)}
-              onRemove={() => remove(g)}
-              onStatus={(s) => setStatus(g, s)}
-            />
-          ))}
+          {games.length > 0 && view === 'calendar' && (
+            <>
+              <MonthCalendar
+                month={calendarMonth}
+                onMonthChange={setCalendarMonth}
+                selectedDate={selectedDate}
+                onSelectDate={setSelectedDate}
+                eventDates={eventDateKeys}
+              />
+              <View style={styles.calendarDivider} />
+              {!selectedDate ? (
+                <Text style={styles.empty}>
+                  Tap a date with a dot to see what's scheduled.
+                </Text>
+              ) : selectedDateEvents.length === 0 ? (
+                <Text style={styles.empty}>Nothing scheduled this day.</Text>
+              ) : (
+                selectedDateEvents.map((g) => (
+                  <GameRow
+                    key={g.id}
+                    game={g}
+                    team={team}
+                    roster={roster}
+                    expanded={expandedId === g.id}
+                    onToggle={() => setExpandedId(expandedId === g.id ? null : g.id)}
+                    onRemove={() => remove(g)}
+                    onStatus={(s) => setStatus(g, s)}
+                  />
+                ))
+              )}
+            </>
+          )}
+
+          {games.length > 0 && view !== 'calendar' && (
+            <>
+              {(view === 'upcoming' ? upcoming : past).length === 0 && (
+                <Text style={styles.empty}>
+                  {view === 'upcoming'
+                    ? "Nothing coming up. Tap + EVENT to add the next one."
+                    : 'No past events yet.'}
+                </Text>
+              )}
+              {(view === 'upcoming' ? upcoming : past).map((g) => (
+                <GameRow
+                  key={g.id}
+                  game={g}
+                  team={team}
+                  roster={roster}
+                  expanded={expandedId === g.id}
+                  onToggle={() => setExpandedId(expandedId === g.id ? null : g.id)}
+                  onRemove={() => remove(g)}
+                  onStatus={(s) => setStatus(g, s)}
+                />
+              ))}
+            </>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -109,6 +178,7 @@ export default function ScheduleScreen() {
 }
 
 function AddGameForm({ team, rules, onDone }) {
+  const sport = sportForTeam(team);
   const [form, setForm] = useState(emptyForm());
   const [busy, setBusy] = useState(false);
   const [added, setAdded] = useState(0);
@@ -132,11 +202,11 @@ function AddGameForm({ team, rules, onDone }) {
         opponent: form.opponent,
         homeOrAway: form.homeOrAway,
         date: combineDateTime(form.dateStr, form.timeStr),
-        park: form.park,
+        location: form.location,
         field: form.field,
         notes: form.notes,
       }, rules);
-      // Keep type, date, park and home/away — a season at the same field means
+      // Keep type, date, location and home/away — a season at the same venue means
       // usually only the opponent or title changes.
       setForm((f) => ({ ...f, opponent: '', title: '', notes: '' }));
       setAdded((n) => n + 1);
@@ -160,7 +230,7 @@ function AddGameForm({ team, rules, onDone }) {
         ))}
       </View>
 
-      <GameFields form={form} set={set} opponentRef={opponentRef} />
+      <GameFields form={form} set={set} opponentRef={opponentRef} sport={sport} />
       <View style={styles.formBtns}>
         <Pressable onPress={onDone} style={[styles.cta, styles.ctaGhost]}>
           <Text style={[styles.ctaText, { color: colors.pencil }]}>DONE</Text>
@@ -174,9 +244,35 @@ function AddGameForm({ team, rules, onDone }) {
 }
 
 function GameRow({ game, team, roster, expanded, onToggle, onRemove, onStatus }) {
+  // Labels differ by sport: a basketball game is at a Court, not a Field.
+  const sport = sportForTeam(team);
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState(emptyForm());
+  const [sheet, setSheet] = useState(false);
+  const [busyPlayer, setBusyPlayer] = useState(null);
+
+  // Fans don't see attendance at all, so there's no listener to open for them.
+  const { isFan, isStaff } = useMyRole();
+  const { counts, attendance } =
+    useRsvps(team.id, game.id, roster, { enabled: !isFan });
+
+  /**
+   * Staff answering on a child's behalf. The rules already permit it; this is
+   * the first control that does. Without it attendance can only be filled in
+   * by parents who have been linked to their child, so a coach whose roster
+   * isn't fully linked sees zeroes no matter how many people replied.
+   */
+  const setFor = useCallback(async (person, status) => {
+    setBusyPlayer(person.playerId);
+    try {
+      await setRsvp({
+        teamId: team.id, eventId: game.id,
+        playerId: person.playerId, status, name: person.name,
+      });
+    } catch (e) { notify('Could not save', e.message); }
+    setBusyPlayer(null);
+  }, [team.id, game.id]);
 
   useEffect(() => {
     if (!expanded) { setEditing(false); return; }
@@ -187,7 +283,7 @@ function GameRow({ game, team, roster, expanded, onToggle, onRemove, onStatus })
       title: game.title || '',
       opponent: game.opponent || '', homeOrAway: game.homeOrAway || 'home',
       dateStr, timeStr,
-      park: game.park || '', field: game.field || '', notes: game.notes || '',
+      location: venueOf(game) || '', field: game.field || '', notes: game.notes || '',
     });
   }, [expanded, game.id]);
 
@@ -202,7 +298,7 @@ function GameRow({ game, team, roster, expanded, onToggle, onRemove, onStatus })
         opponent: form.type === EVENT_TYPES.GAME ? (form.opponent.trim() || null) : null,
         homeOrAway: form.type === EVENT_TYPES.GAME ? form.homeOrAway : null,
         date: combineDateTime(form.dateStr, form.timeStr),
-        park: form.park.trim() || null,
+        location: form.location.trim() || null,
         field: form.field.trim() || null,
         notes: form.notes.trim() || null,
       });
@@ -231,20 +327,41 @@ function GameRow({ game, team, roster, expanded, onToggle, onRemove, onStatus })
             </Text>
           </View>
           <Text style={styles.meta}>
-            {[formatDate(game.date), formatTimeOf(game.date), game.park,
-              game.field ? `Field ${game.field}` : null].filter(Boolean).join(' · ')
+            {[formatDate(game.date), formatTimeOf(game.date), venueOf(game),
+              game.field ? `${sport.FIELD_WORD || 'Field'} ${game.field}` : null]
+              .filter(Boolean).join(' · ')
               || 'No details yet'}
           </Text>
+          {/* Attendance on the main bar. A coach scanning the schedule wants
+              the headcount without opening each row, and tapping it opens the
+              full list rather than expanding the card. */}
+          {!isFan && (
+            <AttendanceBar
+              counts={counts}
+              compact
+              onPress={() => setSheet(true)}
+            />
+          )}
         </View>
         {isGame(game) ? <StatusPill game={game} /> : null}
         <Text style={styles.chev}>{expanded ? '⌃' : '⌄'}</Text>
       </Pressable>
 
+      <AttendanceSheet
+        visible={sheet}
+        eventLabel={eventTitle(game, team.name)}
+        attendance={attendance}
+        isStaff={isStaff}
+        busyId={busyPlayer}
+        onSet={setFor}
+        onClose={() => setSheet(false)}
+      />
+
       {expanded && (
         <View style={styles.cardBody}>
           {editing ? (
             <>
-              <GameFields form={form} set={set} />
+              <GameFields form={form} set={set} sport={sport} />
               <View style={styles.formBtns}>
                 <Pressable onPress={() => setEditing(false)} style={[styles.cta, styles.ctaGhost]}>
                   <Text style={[styles.ctaText, { color: colors.pencil }]}>CANCEL</Text>
@@ -303,7 +420,7 @@ function GameRow({ game, team, roster, expanded, onToggle, onRemove, onStatus })
   );
 }
 
-function GameFields({ form, set, opponentRef }) {
+function GameFields({ form, set, opponentRef, sport }) {
   const show = fieldsFor(form.type);
   return (
     <>
@@ -349,15 +466,16 @@ function GameFields({ form, set, opponentRef }) {
       <View style={[styles.row, { marginTop: spacing.md }]}>
         <View style={styles.flex}>
           <Text style={styles.label}>
-            {form.type === EVENT_TYPES.MISC ? 'Location' : 'Park'}
+            Location
           </Text>
-          <TextInput value={form.park} onChangeText={(v) => set('park', v)}
-            style={inputStyle} placeholder="Rowlett Creek" placeholderTextColor="#A0A8B8"
+          <TextInput value={form.location} onChangeText={(v) => set('location', v)}
+            style={inputStyle} placeholder={sport.VENUE_PLACEHOLDER || 'Venue'}
+            placeholderTextColor="#A0A8B8"
             autoCapitalize="words" />
         </View>
         {show.field && (
           <View style={{ width: 88 }}>
-            <Text style={styles.label}>Field</Text>
+            <Text style={styles.label}>{sport.FIELD_WORD || 'Field'}</Text>
             <TextInput value={form.field} onChangeText={(v) => set('field', v)}
               style={inputStyle} placeholder="4" placeholderTextColor="#A0A8B8" />
           </View>
@@ -422,6 +540,65 @@ function formatTimeOf(d) {
   return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 }
 
+/**
+ * The three-way switch above the list: a calendar icon, Upcoming, Past.
+ *
+ * Not built on the shared SegmentedTabs — that component is text-only, and
+ * mixing an icon segment into it would complicate something several other
+ * screens rely on staying simple. This is Schedule's own, styled to match.
+ */
+/**
+ * The switch above the list: Calendar dominant on the left, Upcoming/Past as
+ * small stacked pills on the right.
+ *
+ * Calendar used to be a bare 44px icon square squeezed between two flex:1
+ * text buttons — the emoji rendered small enough to look like a rendering
+ * bug rather than a button. It's the default view now, so it gets to look
+ * like the primary control it is; Upcoming and Past are secondary filters,
+ * not equal siblings, so they read that way — smaller, stacked, out of the
+ * way of the thing most people open this screen to see.
+ */
+function ScheduleViewSwitch({ value, onChange }) {
+  return (
+    <View style={styles.viewSwitch}>
+      <Pressable
+        onPress={() => onChange('calendar')}
+        accessibilityRole="button" accessibilityLabel="Calendar view"
+        style={[styles.viewSwitchCal, value === 'calendar' && styles.viewSwitchCalOn]}
+      >
+        <Text style={styles.viewSwitchCalIcon}>📅</Text>
+        <Text style={[styles.viewSwitchCalText, value === 'calendar' && styles.viewSwitchTextOn]}>
+          CALENDAR
+        </Text>
+      </Pressable>
+
+      <View style={styles.viewSwitchStack}>
+        <Pressable
+          onPress={() => onChange('upcoming')}
+          style={[styles.viewSwitchSmall, value === 'upcoming' && styles.viewSwitchItemOn]}
+        >
+          <Text style={[styles.viewSwitchSmallText, value === 'upcoming' && styles.viewSwitchTextOn]}>
+            UPCOMING
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => onChange('past')}
+          style={[styles.viewSwitchSmall, value === 'past' && styles.viewSwitchItemOn]}
+        >
+          <Text style={[styles.viewSwitchSmallText, value === 'past' && styles.viewSwitchTextOn]}>
+            PAST
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/** A function declaration, not a const — hoisted, so it's safe to use in the
+    lazy useState initializer above regardless of where it's defined in the
+    file. */
+function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
+
 const Centered = ({ children }) => (
   <SafeAreaView style={styles.centered}>{children}</SafeAreaView>
 );
@@ -429,6 +606,37 @@ const Centered = ({ children }) => (
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.chalk },
   flex: { flex: 1 },
+  viewSwitch: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    paddingHorizontal: spacing.md, paddingTop: spacing.sm, paddingBottom: 2,
+    backgroundColor: colors.chalk,
+  },
+  // The primary control: wide, tall, and unmistakably a button — the bare
+  // 44px icon square this replaced rendered small enough on some phones to
+  // look like a layout bug rather than a tap target.
+  viewSwitchCal: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
+    height: 44, borderRadius: radius.md,
+    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line,
+  },
+  viewSwitchCalOn: { backgroundColor: colors.navy, borderColor: colors.navy },
+  viewSwitchCalIcon: { fontSize: 17 },
+  viewSwitchCalText: { ...text.buttonSecondary, fontSize: 11.5, color: colors.pencil, letterSpacing: 0.6 },
+  // Secondary filters, stacked rather than side by side, so their combined
+  // height matches the calendar button's without competing with it for width.
+  viewSwitchStack: { gap: 4 },
+  viewSwitchSmall: {
+    width: 80, height: 20, borderRadius: radius.sm,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line,
+  },
+  viewSwitchItemOn: { backgroundColor: colors.navy, borderColor: colors.navy },
+  viewSwitchSmallText: { ...text.label, fontSize: 8, color: colors.pencil, letterSpacing: 0.4 },
+  viewSwitchTextOn: { color: '#FFF' },
+  calendarDivider: {
+    height: 1, backgroundColor: colors.line,
+    marginHorizontal: spacing.md, marginTop: spacing.sm, marginBottom: spacing.md,
+  },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chalk, padding: spacing.xl },
   header: { backgroundColor: colors.navy, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   h1: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 18, color: '#FFF' },

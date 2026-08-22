@@ -109,7 +109,7 @@ export default function JoinScreen({ navigation }) {
         </Pressable>
 
         <Text style={styles.fine}>
-          Family members get game alerts and {name}'s stats.
+          Fans get game alerts and {name}'s stats.
           Only parents can approve roster changes.
         </Text>
       </ScrollView>

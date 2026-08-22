@@ -11,9 +11,11 @@
  */
 
 import * as baseball from './baseball/index.js';
+import * as basketball from './basketball/index.js';
 
 export const SPORTS = {
   baseball,
+  basketball,
 };
 
 export const getSport = (key) => SPORTS[key] ?? SPORTS.baseball;

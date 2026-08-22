@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 
 import {
-  saveClip, deleteClip, getClip, probeDuration, playClip, stopClip, audioSupported,
+  saveClip, deleteClip, getClip, probeDuration, probeAudio, playClip, stopClip, audioSupported,
 } from '../services/audioStore';
 import { notify } from '../utils/confirm.js';
 import { colors, radius, spacing, text } from '../theme/tokens.js';
@@ -45,42 +45,54 @@ export default function WalkUpSheet({ visible, player, config, onSave, onClose }
     if (Platform.OS !== 'web') return;
     const input = document.createElement('input');
     input.type = 'file';
-    // Explicit extensions alongside the wildcard: iOS Files applies its own
-    // filter to audio/* and hides .m4a, which is what iOS records and what
-    // Apple Music exports. Listing them by name gets them back.
-    // No accept filter at all.
-    //
-    // iOS Files applies its own interpretation of audio/* and greys out .m4a —
-    // the format iOS itself records and Apple Music exports — and an explicit
-    // extension list didn't reliably fix it either. Accepting everything and
-    // validating after the pick is the only approach that lets people choose
-    // the files they actually have.
+    // No accept filter at all. iOS Files applies its own interpretation of
+    // audio/* and greys out .m4a — the format iOS itself records and Apple
+    // Music exports — and an explicit extension list didn't reliably fix it
+    // either. Accepting everything and validating after the pick is the only
+    // approach that lets people choose the files they actually have.
     input.accept = '';
+    // Off-screen rather than display:none — some WebKit builds, including
+    // inside an installed iOS PWA, silently refuse to open the file picker
+    // for an input that was never attached to the document at all. This was
+    // a real "nothing happens when you tap Choose File" bug, not a display
+    // preference.
+    input.style.position = 'fixed';
+    input.style.top = '-1000px';
+    document.body.appendChild(input);
+
+    const cleanup = () => input.remove();
+
     input.onchange = async () => {
       const file = input.files?.[0];
-      if (!file) return;
+      if (!file) { cleanup(); return; }
       setBusy(true);
       try {
         // Validate by asking the browser whether it can actually decode it,
-        // rather than by trusting the extension or MIME type.
-        const len = await probeDuration(file);
-        if (!len) {
+        // rather than by trusting the extension or MIME type. Gated on
+        // whether it PLAYS, not on whether a duration could be measured —
+        // plenty of real files (VBR MP3s especially) load and play fine
+        // without ever resolving a clean duration.
+        const { playable, duration: len } = await probeAudio(file);
+        if (!playable) {
           notify(
             "Can't play that file",
             `${file.name} isn't a format this browser can decode. MP3, M4A, WAV, and AAC all work.`
           );
           setBusy(false);
+          cleanup();
           return;
         }
         await saveClip(player.playerId, file);
         setSongLength(len);
         setFileName(file.name);
-        // Most walk-up songs have their hook well past the intro.
-        setStart(Math.min(Math.floor(len * 0.25), Math.max(0, len - duration)));
+        // Most walk-up songs have their hook well past the intro. When the
+        // length couldn't be measured, start at the top rather than guessing.
+        setStart(len ? Math.min(Math.floor(len * 0.25), Math.max(0, len - duration)) : 0);
       } catch (e) {
-        console.warn('audio save failed', e);
+        notify('Could not save', e.message || String(e));
       }
       setBusy(false);
+      cleanup();
     };
     input.click();
   }, [player?.playerId, duration]);

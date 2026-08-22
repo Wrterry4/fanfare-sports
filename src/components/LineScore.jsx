@@ -1,29 +1,22 @@
 /**
- * LineScore.jsx — Runs by inning, plus R/H/E.
+ * LineScore.jsx — Score by period, plus totals.
  *
- * The strip a scorebook shows across the top. Inning count comes from the
- * rules, so changing "innings per game" in Settings is visible here
- * immediately rather than after a restart.
+ * The strip a scorebook shows across the top.
+ *
+ * Takes a `grid` from the sport's presenter rather than reading game state. It
+ * used to compute runs-by-inning itself and hard-code an R and an E column,
+ * which only describes baseball — basketball has quarters and one total. The
+ * grid says how many columns there are, what the totals are called, and which
+ * row is currently acting; this renders whatever it's handed.
  */
 
 import React, { memo } from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { colors, text } from '../theme/tokens.js';
 
-function LineScore({ state, rules, awayName, homeName, muted, onToggleMute, modeLabel, onToggleMode }) {
-  const scheduled = rules?.inningsPerGame ?? 6;
-  // Extra innings widen the strip rather than truncating the game.
-  const columns = Math.max(scheduled, state.lineScore.away.length, state.lineScore.home.length,
-                           state.inning);
-
-  const cell = (side, i) => {
-    const played = state.lineScore[side][i];
-    if (played != null) return String(played);
-    // A half-inning not yet reached shows blank; one in progress shows 0.
-    const reached = state.inning > i + 1
-      || (state.inning === i + 1 && (side === 'away' || !state.isTop));
-    return reached ? '0' : '';
-  };
+function LineScore({ grid, awayName, homeName, muted, onToggleMute, modeLabel, onToggleMode }) {
+  if (!grid) return null;
+  const nameFor = { away: awayName, home: homeName };
 
   return (
     <View style={styles.wrap}>
@@ -31,15 +24,12 @@ function LineScore({ state, rules, awayName, homeName, muted, onToggleMute, mode
           names get the room they need without squeezing the innings. */}
       <View style={styles.names}>
         <View style={styles.headSpacer} />
-        {[['away', awayName], ['home', homeName]].map(([side, name]) => {
-          const batting = (side === 'away') === state.isTop && state.status !== 'final';
-          return (
-            <Text key={side} style={[styles.team, batting && styles.teamBatting]}
-                  numberOfLines={1}>
-              {name}
-            </Text>
-          );
-        })}
+        {grid.rows.map((row) => (
+          <Text key={row.side} style={[styles.team, row.active && styles.teamBatting]}
+                numberOfLines={1}>
+            {nameFor[row.side]}
+          </Text>
+        ))}
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
@@ -47,25 +37,25 @@ function LineScore({ state, rules, awayName, homeName, muted, onToggleMute, mode
                   style={styles.gridScroll}>
         <View>
           <View style={styles.row}>
-            {Array.from({ length: columns }, (_, i) => (
+            {grid.headers.map((h, i) => (
               <Text key={i} style={[styles.cell, styles.headCell,
-                     state.inning === i + 1 && styles.headCurrent]}>{i + 1}</Text>
+                     grid.activeColumn === i && styles.headCurrent]}>{h}</Text>
             ))}
-            <Text style={[styles.cell, styles.headCell, styles.total]}>R</Text>
-            <Text style={[styles.cell, styles.headCell, styles.total]}>E</Text>
+            {grid.totalColumns.map((t) => (
+              <Text key={t} style={[styles.cell, styles.headCell, styles.total]}>{t}</Text>
+            ))}
           </View>
 
-          {['away', 'home'].map((side) => {
-            return (
-              <View key={side} style={styles.row}>
-                {Array.from({ length: columns }, (_, i) => (
-                  <Text key={i} style={styles.cell}>{cell(side, i)}</Text>
-                ))}
-                <Text style={[styles.cell, styles.total]}>{state.score[side]}</Text>
-                <Text style={[styles.cell, styles.total]}>{state.errors[side]}</Text>
-              </View>
-            );
-          })}
+          {grid.rows.map((row) => (
+            <View key={row.side} style={styles.row}>
+              {row.cells.map((c, i) => (
+                <Text key={i} style={styles.cell}>{c}</Text>
+              ))}
+              {row.totals.map((t, i) => (
+                <Text key={i} style={[styles.cell, styles.total]}>{t}</Text>
+              ))}
+            </View>
+          ))}
         </View>
       </ScrollView>
 

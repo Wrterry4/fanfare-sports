@@ -11,7 +11,7 @@
 import {
   ROLES, ROLE_CAPABILITIES, INVITE_TYPES, INVITE_ERRORS,
   validateInvite, resolveRole, defaultNotificationPrefs,
-  buildInviteUrl, parseInviteUrl,
+  buildInviteUrl, parseInviteUrl, normalizeRole,
 } from '../src/shared/inviteRules.js';
 import { createHash } from 'crypto';
 
@@ -89,8 +89,12 @@ check('a coach with a kid on the team stays a coach',
   resolveRole(ROLES.COACH, ROLES.PARENT), ROLES.COACH);
 check('a fan who becomes a parent is upgraded',
   resolveRole(ROLES.FAN, ROLES.PARENT), ROLES.PARENT);
-check('a parent asked to keep the book is upgraded',
-  resolveRole(ROLES.PARENT, ROLES.SCOREKEEPER), ROLES.SCOREKEEPER);
+// There is no longer a role between parent and coach. Keeping the book is
+// the baton, not a promotion.
+check('a parent asked to help coach is upgraded',
+  resolveRole(ROLES.PARENT, ROLES.COACH), ROLES.COACH);
+check('a coach is not downgraded to parent by a team invite',
+  resolveRole(ROLES.COACH, ROLES.PARENT), ROLES.COACH);
 check('ownership is never downgraded by an invite',
   resolveRole(ROLES.OWNER, ROLES.COACH), ROLES.OWNER);
 
@@ -102,9 +106,18 @@ check('a fan stays out of team chat', ROLE_CAPABILITIES[ROLES.FAN].teamChat, fal
 check('a fan cannot see the whole roster\'s stats',
   ROLE_CAPABILITIES[ROLES.FAN].seeAllPlayers, false);
 check('a coach can', ROLE_CAPABILITIES[ROLES.COACH].seeAllPlayers, true);
-check('a scorekeeper scores but cannot edit the roster',
-  [ROLE_CAPABILITIES[ROLES.SCOREKEEPER].score,
-   ROLE_CAPABILITIES[ROLES.SCOREKEEPER].manageRoster], [true, false]);
+// Scoring is a parent capability now: the scorekeeper role was removed
+// because who keeps the book changes game to game, and that's the baton's
+// job (scorekeeperUid on the game), not a season-long label.
+check('a parent scores but cannot edit the roster',
+  [ROLE_CAPABILITIES[ROLES.PARENT].score,
+   ROLE_CAPABILITIES[ROLES.PARENT].manageRoster], [true, false]);
+check('the removed scorekeeper role is not offered',
+  ROLES.SCOREKEEPER, undefined);
+check('but an existing scorekeeper member keeps parent-level access',
+  normalizeRole('scorekeeper'), ROLES.PARENT);
+check('a real role passes through normalization unchanged',
+  normalizeRole(ROLES.COACH), ROLES.COACH);
 
 out.push('\nNotification defaults');
 {

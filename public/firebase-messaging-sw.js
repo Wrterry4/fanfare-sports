@@ -29,9 +29,20 @@ const messaging = firebase.messaging();
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 
+/**
+ * The ONLY place a background notification is displayed.
+ *
+ * The server used to include a `notification` block for web, which the browser
+ * displayed automatically AND delivered here — so this handler's
+ * showNotification produced a second banner for every event. The server now
+ * sends data-only to web and carries the text in `data`, leaving this as the
+ * single display path.
+ */
 messaging.onBackgroundMessage((payload) => {
-  const { title, body } = payload.notification || {};
   const data = payload.data || {};
+  // notification block kept as a fallback for anything sent the old way.
+  const title = data.title || payload.notification?.title;
+  const body = data.body || payload.notification?.body;
 
   self.registration.showNotification(title || 'Fanfare', {
     body,

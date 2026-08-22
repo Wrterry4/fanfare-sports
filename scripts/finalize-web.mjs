@@ -59,10 +59,23 @@ const HEAD = `
       @supports (height: 100dvh) {
         html, body, #root { height: 100dvh; }
       }
-      /* Belt and braces for the installed PWA, where the visual viewport can
-         still be a few pixels taller than what's actually visible. */
-      @supports (height: -webkit-fill-available) {
-        html, body, #root { min-height: -webkit-fill-available; }
+      /* DO NOT add min-height: -webkit-fill-available here.
+         It was here as "belt and braces" and it was the bug. On an installed
+         iOS PWA, -webkit-fill-available resolves TALLER than the visible
+         viewport, and because min-height beats height whenever it's larger,
+         #root grew past the bottom of the screen. The tab bar sits at the
+         bottom of #root, so it was pushed off-screen — labels clipped by the
+         screen edge, with the extra height showing as a dead strip above the
+         bar. 100dvh already tracks the real visible area. */
+
+      /* env() can't be read from a React Native style object, so it's exposed
+         as a custom property that JS can read back through
+         getComputedStyle. See src/hooks/useBottomInset.web.js — this is what
+         lets the tab bar sit exactly on the home indicator rather than
+         guessing a fixed 20px. */
+      :root {
+        --safe-top: env(safe-area-inset-top, 0px);
+        --safe-bottom: env(safe-area-inset-bottom, 0px);
       }
       html, body, #root { overscroll-behavior: none; }
       body {

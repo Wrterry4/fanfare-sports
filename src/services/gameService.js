@@ -26,8 +26,9 @@ import {
 } from './firebase';
 import { httpsCallable } from './firebase';
 import { db, functions } from './firebase';
-import { reduce } from '../sports/baseball/engine.js';
-import { computeStats } from '../sports/baseball/stats.js';
+// No sport import here. This service used to reduce every game with the
+// baseball engine regardless of the team's sport, which produced baseball
+// state (bases, lineScore) for a basketball game. The caller passes the pack.
 import { shouldSyncSummary } from '../shared/gameSummary.js';
 
 const gamePath   = (teamId, gameId) => doc(db, 'teams', teamId, 'games', gameId);
@@ -43,7 +44,13 @@ const eventsPath = (teamId, gameId) => collection(db, 'teams', teamId, 'games', 
  *
  * onUpdate receives { game, events, state, stats, isStale }.
  */
-export function subscribeToGame(teamId, gameId, rules, config, names, onUpdate) {
+export function subscribeToGame(teamId, gameId, rules, config, names, onUpdate, sport) {
+  // Defaulting to baseball keeps every existing call site working — games
+  // written before `sport` existed are baseball.
+  const { reduce, computeStats } = sport || {};
+  if (!reduce || !computeStats) {
+    throw new Error('subscribeToGame needs a sport pack with reduce and computeStats');
+  }
   let game = null;
   let events = [];
   let ready = { game: false, events: false };

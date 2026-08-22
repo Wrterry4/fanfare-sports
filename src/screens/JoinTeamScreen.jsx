@@ -24,10 +24,20 @@ import { notify } from '../utils/confirm.js';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 import { inputStyle } from '../theme/inputs.js';
 
+/**
+ * Three roles, in the order most people pick them.
+ *
+ * Scorekeeper was here and is gone: who keeps the book changes game to game,
+ * and the app already models that properly as the baton on the game document.
+ * Asking someone to commit to it at signup froze a two-hour job into a
+ * season-long label — and a parent can score anyway.
+ *
+ * "Grandparent or family" became "Fan" to match the app's own vocabulary; the
+ * description carries the meaning, so nothing is lost by naming it once.
+ */
 const ROLES = [
   ['parent', 'Parent', 'Full access to your own player, and team messages.'],
-  ['fan', 'Grandparent or family', "Follow one player's games and stats."],
-  ['scorekeeper', 'Scorekeeper', 'Can keep the book during games.'],
+  ['fan', 'Fan', "Follow one player's games and stats."],
   ['coach', 'Coach', 'Manage the roster, schedule, and settings.'],
 ];
 

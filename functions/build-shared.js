@@ -22,7 +22,23 @@ const dest = join(here, 'shared');
 
 const SOURCES = [
   { from: join(root, 'src/sports/baseball'), to: join(dest, 'baseball') },
+  { from: join(root, 'src/sports/basketball'), to: join(dest, 'basketball') },
   { from: join(root, 'src/shared'), to: join(dest, 'common') },
+];
+
+/**
+ * Single files, copied to the root of shared/.
+ *
+ * sportNotify.js resolves its packs as './baseball/notify.js', which only
+ * works if it sits alongside the baseball folder — hence the root rather than
+ * a sports/ subdirectory mirroring the source tree.
+ *
+ * The main registry is deliberately NOT copied: it re-exports .jsx components
+ * through each pack's index, and only .js files reach the deployed bundle.
+ */
+const FILES = [
+  { from: join(root, 'src/sports/sportNotify.js'), to: join(dest, 'sportNotify.js') },
+  { from: join(root, 'src/sports/serverDispatch.js'), to: join(dest, 'serverDispatch.js') },
 ];
 
 if (existsSync(dest)) rmSync(dest, { recursive: true });
@@ -32,9 +48,18 @@ for (const { from, to } of SOURCES) {
   mkdirSync(to, { recursive: true });
   for (const file of readdirSync(from)) {
     if (!file.endsWith('.js')) continue;
+    // A pack's index.js re-exports its .jsx components, which never reach the
+    // bundle. Nothing server-side imports it, and shipping a module that
+    // throws on import is a trap for whoever tries later.
+    if (file === 'index.js') continue;
     copyFileSync(join(from, file), join(to, file));
     count++;
   }
+}
+
+for (const { from, to } of FILES) {
+  copyFileSync(from, to);
+  count++;
 }
 
 console.log(`[build-shared] vendored ${count} modules into functions/shared/`);

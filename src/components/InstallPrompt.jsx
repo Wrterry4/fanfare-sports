@@ -18,17 +18,13 @@
 
 import React, { useState, useEffect } from 'react';
 import { View, Text, Pressable, StyleSheet, Platform } from 'react-native';
+import { isInstalled } from '../services/push';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 
 const isIOS = () =>
   Platform.OS === 'web' &&
   (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
-
-const isInstalled = () =>
-  Platform.OS !== 'web' ||
-  window.matchMedia?.('(display-mode: standalone)').matches ||
-  window.navigator.standalone === true;
 
 export default function InstallPrompt({ reason = 'alerts', onDismiss }) {
   const [deferred, setDeferred] = useState(null);

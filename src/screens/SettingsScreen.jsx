@@ -22,38 +22,22 @@ import {
 } from '../services/membership.js';
 import { useMyRole } from '../hooks/useMyRole.js';
 import NotificationSettings from '../components/NotificationSettings.jsx';
-import { RULE_PRESETS, RULE_BOUNDS, PRESET_ORDER } from '../sports/baseball/rules.js';
+import { sportForTeam } from '../sports/registry.js';
 import { confirm, notify } from '../utils/confirm.js';
 import AppHeader from '../components/AppHeader.jsx';
 import AccountSheet from '../components/AccountSheet.jsx';
+import { ensureStatsAccess } from '../services/statsService.js';
+import { BUILD_INFO } from '../generated/buildInfo.js';
+import { formatBuildLabel } from '../shared/buildLabel.js';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 import { inputStyle } from '../theme/inputs.js';
-
-const NUMBERS = [
-  ['inningsPerGame', 'Innings per game'],
-  ['maxRunsPerInning', 'Run cap per inning'],
-  ['mercyRuleDifferential', 'Mercy rule run difference'],
-  ['mercyRuleAfterInning', 'Mercy rule after inning'],
-  ['gameTimeLimitMinutes', 'Time limit (minutes)'],
-  ['maxPitchesPerOuting', 'Max pitches per outing'],
-];
-
-const TOGGLES = [
-  ['continuousBattingOrder', 'Bat the whole roster'],
-  ['reverseBattingOrderEachInning', 'Reverse batting order each inning'],
-  ['droppedThirdStrike', 'Dropped third strike'],
-  ['stealingAllowed', 'Stealing allowed'],
-  ['leadOffsAllowed', 'Lead-offs allowed'],
-  ['infieldFlyRule', 'Infield fly rule'],
-  ['walksAdvanceAllRunners', 'Walks advance all runners'],
-  ['courtesyRunnerForCatcher', 'Courtesy runner for catcher'],
-];
-
-const PRESETS = PRESET_ORDER;
 
 export default function SettingsScreen() {
   const { team, loading } = useGameDay();
   const { user } = useAuth();
+  // Not a hook — BUILD_INFO is fixed for the lifetime of this bundle, so
+  // there's nothing to recompute on re-render.
+  const buildLabel = formatBuildLabel(BUILD_INFO);
   const [rules, setRules] = useState(null);
   const [members, setMembers] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -61,6 +45,20 @@ export default function SettingsScreen() {
   const [claims, setClaims] = useState([]);
   const [copied, setCopied] = useState(false);
   const { isStaff, isFan, member } = useMyRole();
+
+  /**
+   * Rule labels come from the team's sport.
+   *
+   * These were three hardcoded arrays in this file, all describing baseball —
+   * a basketball team's settings offered "Innings per game" and "Dropped third
+   * strike". Each pack now names the rules it actually has.
+   */
+  const sport = sportForTeam(team);
+  const NUMBERS = sport.RULE_NUMBERS || [];
+  const TOGGLES = sport.RULE_TOGGLES || [];
+  const PRESETS = sport.PRESET_LABELS || [];
+  const RULE_BOUNDS = sport.RULE_BOUNDS || {};
+  const RULE_PRESETS = sport.RULE_PRESETS || {};
 
   useEffect(() => { if (team?.rules) setRules({ ...team.rules }); }, [team?.id]);
   useEffect(() => {
@@ -127,6 +125,10 @@ export default function SettingsScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
 
+          {/* Staff only. The join code adds people to the team, which isn't a
+              fan's call to make — and a fan opening Settings to change their
+              notification preferences shouldn't be handed one. */}
+          {isStaff && (
           <Section title="Invite people"
                    sub="Anyone with this code can join the team. They see a player's stats only after you link them to that child.">
             <View style={styles.codeBox}>
@@ -140,6 +142,7 @@ export default function SettingsScreen() {
               team's group chat.
             </Text>
           </Section>
+          )}
 
           {isStaff && claims.length > 0 && (
             <Section title={`Requests · ${claims.length}`}
@@ -149,7 +152,7 @@ export default function SettingsScreen() {
                   <View style={styles.flex}>
                     <Text style={styles.claimName}>{c.requestedByName}</Text>
                     <Text style={styles.claimMeta}>
-                      wants to be linked as {c.kind === 'parent' ? 'a parent' : 'family'}
+                      wants to be linked as {c.kind === 'parent' ? 'a parent' : 'a fan'}
                     </Text>
                   </View>
                   <Pressable onPress={() => resolvePlayerClaim(c.id, false)}
@@ -183,6 +186,9 @@ export default function SettingsScreen() {
             <NotificationSettings team={team} member={member} isFan={isFan} />
           </Section>
 
+          {/* Rules of play are the coach's. Everyone else gets Settings for
+              their own notification preferences and nothing more. */}
+          {isStaff && (<>
           <Section title="Start from a preset"
                    sub="Overwrites the values below. Adjust anything afterward.">
             <View style={styles.chips}>
@@ -221,6 +227,12 @@ export default function SettingsScreen() {
           <Pressable onPress={save} disabled={saving} style={styles.cta}>
             {saving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.ctaText}>SAVE SETTINGS</Text>}
           </Pressable>
+          </>)}
+
+          {/* Visible to every role, staff or not — this is a diagnostic
+              anyone might need to read out loud on a phone call, not a
+              staff-only setting. */}
+          <Text style={styles.buildLabel}>{buildLabel}</Text>
 
         </ScrollView>
       </KeyboardAvoidingView>
@@ -287,6 +299,11 @@ const Centered = ({ children }) => (
 );
 
 const styles = StyleSheet.create({
+  presetBtn: {
+    height: 46, borderRadius: 10, borderWidth: 1, borderColor: colors.line,
+    backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center',
+  },
+  presetBtnText: { ...text.buttonSecondary, fontSize: 11, color: colors.navy, letterSpacing: 0.6 },
   root: { flex: 1, backgroundColor: colors.chalk },
   flex: { flex: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chalk, padding: spacing.xl },
@@ -317,7 +334,6 @@ const styles = StyleSheet.create({
   claimGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.line },
   claimBtnText: { ...text.buttonSecondary, fontSize: 10, color: '#FFF', letterSpacing: 0.6 },
   youTag: { ...text.label, fontSize: 8.5, color: colors.primary },
-  flex: { flex: 1 },
   hint: { ...text.body, fontSize: 11.5, color: colors.pencil, marginTop: 6, lineHeight: 16 },
   memberRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.line },
   memberName: { ...text.bodyStrong, fontSize: 14, color: colors.navy },
@@ -348,5 +364,9 @@ const styles = StyleSheet.create({
   cta: { height: 50, borderRadius: radius.md, backgroundColor: colors.navy, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm },
   ctaGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.line },
   ctaText: { ...text.buttonSecondary, color: '#FFF', letterSpacing: 0.8 },
+  buildLabel: {
+    ...text.label, fontSize: 9.5, color: colors.pencil, opacity: 0.6,
+    textAlign: 'center', marginTop: spacing.xl, marginBottom: spacing.md,
+  },
   msg: { ...text.body, color: colors.pencil, textAlign: 'center' },
 });

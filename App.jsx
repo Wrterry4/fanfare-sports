@@ -12,12 +12,24 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import RootNavigator from './src/navigation/RootNavigator.jsx';
 import ErrorBoundary from './src/components/ErrorBoundary.jsx';
-import { AuthProvider } from './src/hooks/AuthProvider.jsx';
+import { AuthProvider, useAuth } from './src/hooks/AuthProvider.jsx';
 import { ActiveTeamProvider } from './src/hooks/ActiveTeam.jsx';
+import { InAppNoticeProvider } from './src/components/InAppNotice.jsx';
+import PostInstallNotifyPrompt from './src/components/PostInstallNotifyPrompt.jsx';
 import { navigationRef } from './src/navigation/navigationRef.js';
 import { linkingConfig } from './src/navigation/linking.js';
 import { connectEmulators } from './src/services/firebase';
 import { colors } from './src/theme/tokens.js';
+
+/**
+ * useAuth() only works below <AuthProvider>, so the prompt needs its own tiny
+ * wrapper rather than being mounted directly in App() alongside the provider
+ * that supplies it.
+ */
+function PostInstallNotifyGate() {
+  const { user } = useAuth();
+  return <PostInstallNotifyPrompt uid={user?.uid} />;
+}
 
 export default function App() {
   useEffect(() => { connectEmulators(); }, []);
@@ -32,7 +44,13 @@ export default function App() {
             pending invites and burn the single-use link. */}
         <AuthProvider>
           <ActiveTeamProvider>
-            <RootNavigator />
+            {/* Wraps the navigator so a foreground notice floats above every
+                screen. Background pushes are handled by the service worker;
+                this is only for messages arriving while the app is open. */}
+            <InAppNoticeProvider>
+              <RootNavigator />
+            </InAppNoticeProvider>
+            <PostInstallNotifyGate />
           </ActiveTeamProvider>
         </AuthProvider>
       </NavigationContainer>

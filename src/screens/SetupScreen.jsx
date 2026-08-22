@@ -14,17 +14,18 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { createTeam, createPlayers, createGame, SPARK_MODE } from '../services/bootstrap.js';
-import { RULE_PRESETS } from '../sports/baseball/rules.js';
+import { getSport } from '../sports/registry.js';
 import { confirm, notify } from '../utils/confirm.js';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 
-const PRESETS = [
-  ['tball', 'T-Ball'],
-  ['coachPitch', 'Coach Pitch'],
-  ['kidPitch10U', '10U Kid Pitch'],
-  ['kidPitch12U', '12U Kid Pitch'],
-  ['highSchool', 'High School'],
-];
+/**
+ * First run creates a baseball team. Other sports are created afterward from
+ * the account menu, which has a sport picker — a three-step wizard is for
+ * teaching the app, and a sport choice on step one is a question a first-time
+ * user has no context to answer.
+ */
+const SETUP_SPORT = 'baseball';
+const PRESETS = getSport(SETUP_SPORT).PRESET_LABELS;
 
 export default function SetupScreen({ navigation }) {
   const [step, setStep] = useState(1);
@@ -49,7 +50,7 @@ export default function SetupScreen({ navigation }) {
       if (!teamName.trim()) throw new Error('Give the team a name.');
       const { teamId: id } = await createTeam({
         name: teamName, season, division: PRESETS.find(p => p[0] === preset)?.[1],
-        rules: RULE_PRESETS[preset], sport: 'baseball',
+        rules: getSport(SETUP_SPORT).RULE_PRESETS[preset], sport: SETUP_SPORT,
       });
       setTeamId(id);
       setStep(2);
@@ -73,7 +74,7 @@ export default function SetupScreen({ navigation }) {
       if (!opponent.trim()) throw new Error('Who are you playing?');
       await createGame({
         teamId, opponent, homeOrAway,
-        rules: RULE_PRESETS[preset], date: new Date(),
+        rules: getSport(SETUP_SPORT).RULE_PRESETS[preset], date: new Date(),
       });
       navigation.replace('Tabs');
     } catch (e) { setError(e.message); setBusy(false); }

@@ -20,14 +20,16 @@
 
 import { onDocumentCreated, onDocumentWritten } from 'firebase-functions/v2/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
 
-import { reduce } from './shared/baseball/engine.js';
-import { EV, HITS } from './shared/baseball/events.js';
-import { buildGameConfig } from './shared/baseball/config.js';
+// Sport dispatch, not a baseball import. This function used to pull in the
+// baseball engine and hard-code "singled"/"doubled"/RBI wording, which made a
+// Cloud Function a baseball function — a second sport would have meant a
+// switch here growing a branch forever.
+import { notifyPackFor } from './shared/sportNotify.js';
+import { db } from './firebase-init.js';
 
-const db = getFirestore();
 
 // ---------------------------------------------------------------------------
 // Delivery
@@ -51,14 +53,41 @@ async function sendToUsers(uids, { title, body, data = {} }) {
   }
   if (!tokenOwners.length) return;
 
+  /**
+   * ── Why web gets a DATA-ONLY message ────────────────────────────────────
+   *
+   * This used to send a top-level `notification` block to every platform. On
+   * web that block is displayed AUTOMATICALLY by the browser — and it also
+   * wakes onBackgroundMessage in the service worker, which called
+   * showNotification itself. Two banners for one event, every time.
+   *
+   * Data-only leaves the service worker as the single thing that displays,
+   * and carries title and body in `data` so it still has something to show.
+   * Native keeps the notification block, which is what iOS and Android need
+   * to display while the app is backgrounded.
+   *
+   * The `channel` field is what lets the client tell a background push from a
+   * foreground in-app message: the SW shows an OS banner, the foreground
+   * handler shows a toast instead. Nobody wants a system notification for a
+   * game they're actively watching.
+   */
+  const stringData = Object.fromEntries(
+    Object.entries({ ...data, title, body, channel: 'push' })
+      .map(([k, v]) => [k, String(v)])
+  );
+
   const res = await getMessaging().sendEachForMulticast({
     tokens: tokenOwners.map((t) => t.token),
-    notification: { title, body },
-    data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v)])),
-    apns: { payload: { aps: { sound: 'default' } } },
-    android: { priority: 'high' },
+    data: stringData,
+    apns: {
+      payload: { aps: { sound: 'default', alert: { title, body } } },
+    },
+    android: {
+      priority: 'high',
+      notification: { title, body },
+    },
     webpush: {
-      notification: { icon: '/icons/icon-192.png', badge: '/icons/badge-72.png' },
+      // Deliberately no `notification` key — see above.
       fcmOptions: { link: data.link || '/' },
     },
   });
@@ -100,8 +129,20 @@ async function followersOfPlayer(teamId, playerId, prefKey) {
     .map((d) => d.id);
 }
 
-const teamName = async (teamId) =>
-  (await db.doc(`teams/${teamId}`).get()).data()?.name || 'Your team';
+/**
+ * One read, both facts. notifyScoringPlay and notifyGameStatus need the
+ * team's sport as well as its name — using team.sport rather than
+ * game.sport is what makes the sport-accurate wording apply to every game
+ * already in progress, not just ones created after this shipped, since
+ * team.sport has been set at creation time all along and game.sport never
+ * was.
+ */
+const teamMeta = async (teamId) => {
+  const data = (await db.doc(`teams/${teamId}`).get()).data();
+  return { name: data?.name || 'Your team', sport: data?.sport || 'baseball' };
+};
+
+const teamName = async (teamId) => (await teamMeta(teamId)).name;
 
 // ---------------------------------------------------------------------------
 // Test send
@@ -160,11 +201,23 @@ export const notifyTeamMessage = onDocumentCreated(
     const uids = await membersWanting(teamId, prefKey,
       { excludeUid: msg.senderId, excludeFans: true });
 
+    /**
+     * Team chat and a direct message used to look identical — both just
+     * showed the sender's name as the title, with no way to tell from the
+     * notification itself whether "Jessica" meant a private message or one
+     * posted to the whole team. Worse for a person on more than one team:
+     * nothing said WHICH team's Jessica.
+     *
+     * Team name leads because "where" is the thing a glance needs first;
+     * the sender goes in the body, which is the shape group-chat
+     * notifications everyone already recognizes.
+     */
+    const teamLabel = await teamName(teamId);
     await sendToUsers(uids, {
       title: channelId === 'announcements'
-        ? `${await teamName(teamId)} · Announcement`
-        : msg.senderName || 'Team chat',
-      body: msg.text?.slice(0, 140) || '',
+        ? `${teamLabel} · Announcement`
+        : `${teamLabel} · Team Chat`,
+      body: `${msg.senderName || 'Someone'}: ${msg.text?.slice(0, 140) || ''}`,
       data: { type: channelId === 'announcements' ? 'announcement' : 'chatter',
               teamId, link: `/teams/${teamId}/messages` },
     });
@@ -193,8 +246,12 @@ export const notifyDirectMessage = onDocumentCreated(
       if (m.data()?.notificationPrefs?.directMessages !== false) wanting.push(uid);
     }
 
+    // The sender leads here — a DM is personal, so who it's from matters
+    // more than where it's from. The team name still rides along in case the
+    // same two people are connected on more than one team.
+    const teamLabel = await teamName(convo.teamId);
     await sendToUsers(wanting, {
-      title: msg.senderName || 'New message',
+      title: `${msg.senderName || 'New message'} · ${teamLabel}`,
       body: msg.text?.slice(0, 140) || '',
       data: { type: 'directMessage', teamId: convo.teamId, conversationId,
               link: `/teams/${convo.teamId}/messages` },
@@ -218,14 +275,18 @@ export const notifyGameStatus = onDocumentWritten(
     if ((after.type || 'game') !== 'game') return;
 
     const { teamId, gameId } = event.params;
-    const name = await teamName(teamId);
+    const { name, sport: sportKey } = await teamMeta(teamId);
     const vs = `${after.homeOrAway === 'home' ? 'vs' : '@'} ${after.opponent}`;
 
     if (after.status === 'live') {
       const uids = await membersWanting(teamId, 'gameStart');
+      // Resolved from the TEAM, not after.sport — no game document has ever
+      // had a `sport` field, so reading it here always fell back to
+      // baseball's "First pitch" regardless of what the team actually plays.
+      const { body } = notifyPackFor(sportKey).describeGameStart();
       await sendToUsers(uids, {
         title: `${name} ${vs}`,
-        body: 'First pitch — follow along live.',
+        body,
         data: { type: 'gameStart', teamId, gameId, link: `/teams/${teamId}/games/${gameId}` },
       });
       return;
@@ -249,37 +310,33 @@ export const notifyGameStatus = onDocumentWritten(
 // Hits, RBIs, and coming to the plate
 // ---------------------------------------------------------------------------
 
-const HIT_WORD = {
-  [EV.SINGLE]: 'singled',
-  [EV.DOUBLE]: 'doubled',
-  [EV.TRIPLE]: 'tripled',
-  [EV.HOME_RUN]: 'homered',
-};
-
-const NOTIFIABLE = new Set([
-  ...HITS, EV.WALK, EV.SAC_FLY, EV.BATTER_UP,
-]);
-
 export const notifyScoringPlay = onDocumentCreated(
   'teams/{teamId}/games/{gameId}/events/{eventId}',
   async (event) => {
     const created = event.data?.data();
-    if (!created || !NOTIFIABLE.has(created.type)) return;
+    if (!created) return;
 
     const { teamId, gameId } = event.params;
 
-    /**
-     * The event document records the type but not who batted — the scorekeeper
-     * taps "Single" and the engine derives the batter from game state. So the
-     * log is replayed here with the same engine the app uses, which gives both
-     * the batter and the exact RBI count.
-     *
-     * Only hits and walks get this far, so it runs about eighty times a game
-     * rather than on every pitch.
-     */
     const gameSnap = await db.doc(`teams/${teamId}/games/${gameId}`).get();
     const game = gameSnap.data();
     if (!game) return;
+
+    /**
+     * The team's sport, not the game document's.
+     *
+     * game.sport is never written anywhere in the client — it doesn't exist
+     * on a single game document that's ever been created. notifyPackFor was
+     * therefore always defaulting to baseball, for every team, regardless of
+     * what they actually play — the exact "still baseball themed" symptom.
+     * team.sport has been set correctly since team creation; using it here is
+     * both the fix and the reason it applies to games already in progress.
+     */
+    const { sport: sportKey, name: teamLabel } = await teamMeta(teamId);
+    const pack = notifyPackFor(sportKey);
+    // Cheap check first — this trigger fires on every pitch, and replaying the
+    // log for a called ball would be wasteful.
+    if (!pack.isNotifiable(created.type)) return;
 
     const evSnap = await db.collection(`teams/${teamId}/games/${gameId}/events`)
       .orderBy('seq').get();
@@ -287,37 +344,23 @@ export const notifyScoringPlay = onDocumentCreated(
     const events = evSnap.docs.map((d) => d.data())
       .filter((e) => !e.voided && e.seq <= created.seq);
 
-    const state = reduce(events, game.rulesSnapshot || {}, buildGameConfig(game));
-    const playerId = state._batterId;
-    if (!playerId || String(playerId).startsWith('opp_')) return;
+    const play = pack.describePlay(created, events, game);
+    if (!play) return;
 
-    const playerSnap = await db.doc(`players/${playerId}`).get();
+    const playerSnap = await db.doc(`players/${play.playerId}`).get();
     const first = playerSnap.data()?.firstName || 'Your player';
 
-    if (created.type === EV.BATTER_UP) {
-      const uids = await followersOfPlayer(teamId, playerId, 'myPlayerAtBat');
-      await sendToUsers(uids, {
-        title: `${first} is up`,
-        body: 'At the plate now.',
-        data: { type: 'atBat', teamId, gameId, playerId,
-                link: `/teams/${teamId}/games/${gameId}` },
-      });
-      return;
-    }
+    const matchup = `${teamLabel} `
+      + `${game.homeOrAway === 'home' ? 'vs' : '@'} ${game.opponent}`;
 
-    const rbi = state._rbi || 0;
-    const word = HIT_WORD[created.type]
-      || (created.type === EV.WALK ? 'walked' : 'hit a sacrifice fly');
-
-    let body = `${first} ${word}`;
-    if (rbi > 0) body += ` — ${rbi} RBI`;
-
-    const uids = await followersOfPlayer(teamId, playerId, 'myPlayerResult');
+    const uids = await followersOfPlayer(teamId, play.playerId, play.preferenceKey);
     await sendToUsers(uids, {
-      title: `${await teamName(teamId)} ${game.homeOrAway === 'home' ? 'vs' : '@'} ${game.opponent}`,
-      body,
-      data: { type: 'result', teamId, gameId, playerId,
-              link: `/teams/${teamId}/games/${gameId}` },
+      title: play.title(first, { matchup }),
+      body: play.body(first, { matchup }),
+      data: {
+        type: play.kind, teamId, gameId, playerId: play.playerId,
+        link: `/teams/${teamId}/games/${gameId}`,
+      },
     });
   }
 );

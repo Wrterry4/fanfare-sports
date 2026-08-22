@@ -8,39 +8,26 @@
  * which is the number that decides whether there's a game.
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 
-import { subscribeRsvps, setRsvp } from '../services/eventService.js';
+import { setRsvp } from '../services/eventService.js';
 import { useMyRole } from '../hooks/useMyRole.js';
 import { useAuth } from '../hooks/AuthProvider.jsx';
-import { RSVP_OPTIONS, RSVP, isSelfRsvp } from '../shared/eventTypes.js';
+import { useRsvps } from '../hooks/useRsvps.js';
+import AttendanceSheet, { AttendanceBar } from './AttendanceSheet.jsx';
+import { RSVP_OPTIONS } from '../shared/eventTypes.js';
 import { notify } from '../utils/confirm.js';
 import { colors, radius, spacing, text } from '../theme/tokens.js';
 
 export default function RsvpRow({ teamId, eventId, roster }) {
   const { user } = useAuth();
   const { isFan, isStaff, linkedPlayerIds } = useMyRole();
-  const [rsvps, setRsvps] = useState([]);
   const [busy, setBusy] = useState(null);
+  const [sheet, setSheet] = useState(false);
 
-  useEffect(() => {
-    if (!teamId || !eventId || isFan) return undefined;
-    return subscribeRsvps(teamId, eventId, setRsvps);
-  }, [teamId, eventId, isFan]);
-
-  const byId = useMemo(
-    () => Object.fromEntries(rsvps.map((r) => [r.id, r])), [rsvps]);
-
-  const counts = useMemo(() => {
-    const c = { yes: 0, maybe: 0, no: 0, playersIn: 0 };
-    for (const r of rsvps) {
-      if (c[r.status] === undefined) continue;
-      c[r.status] += 1;
-      if (!isSelfRsvp(r.id) && r.status === RSVP.YES) c.playersIn += 1;
-    }
-    return c;
-  }, [rsvps]);
+  const { counts, attendance, byId } =
+    useRsvps(teamId, eventId, roster, { enabled: !isFan });
 
   const answer = useCallback(async (playerId, status, name) => {
     const key = playerId || 'self';
@@ -68,11 +55,7 @@ export default function RsvpRow({ teamId, eventId, roster }) {
     <View style={styles.wrap}>
       <View style={styles.head}>
         <Text style={styles.label}>WHO'S COMING</Text>
-        <Text style={styles.counts}>
-          {counts.playersIn} player{counts.playersIn === 1 ? '' : 's'} in
-          {counts.maybe ? ` · ${counts.maybe} maybe` : ''}
-          {counts.no ? ` · ${counts.no} out` : ''}
-        </Text>
+        <AttendanceBar counts={counts} onPress={() => setSheet(true)} />
       </View>
 
       {rows.map((row) => {
@@ -101,16 +84,18 @@ export default function RsvpRow({ teamId, eventId, roster }) {
         );
       })}
 
-      {isStaff && rsvps.length > 0 && (
-        <View style={styles.detail}>
-          {rsvps.filter((r) => !isSelfRsvp(r.id)).map((r) => (
-            <Text key={r.id} style={styles.detailLine}>
-              {r.name || 'Player'} — {r.status === RSVP.YES ? 'in'
-                : r.status === RSVP.MAYBE ? 'maybe' : 'out'}
-            </Text>
-          ))}
-        </View>
-      )}
+      <Pressable onPress={() => setSheet(true)} style={styles.seeAll}>
+        <Text style={styles.seeAllText}>SEE EVERYONE ›</Text>
+      </Pressable>
+
+      <AttendanceSheet
+        visible={sheet}
+        attendance={attendance}
+        isStaff={isStaff}
+        busyId={busy}
+        onSet={(person, status) => answer(person.playerId, status, person.name)}
+        onClose={() => setSheet(false)}
+      />
     </View>
   );
 }
@@ -135,9 +120,9 @@ const styles = StyleSheet.create({
   on_no: { backgroundColor: '#F3E5E5', borderColor: colors.out },
   optionText: { ...text.bodyStrong, fontSize: 11.5, color: colors.pencil },
   optionTextOn: { color: colors.navy },
-  detail: {
-    marginTop: spacing.sm, paddingTop: spacing.sm,
-    borderTopWidth: 1, borderTopColor: colors.line,
+  seeAll: {
+    marginTop: 2, paddingTop: spacing.sm,
+    borderTopWidth: 1, borderTopColor: colors.line, alignItems: 'center',
   },
-  detailLine: { ...text.body, fontSize: 11.5, color: colors.pencil, lineHeight: 17 },
+  seeAllText: { ...text.label, fontSize: 9, color: colors.pencil },
 });

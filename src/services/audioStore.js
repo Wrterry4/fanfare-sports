@@ -16,5 +16,6 @@ export const hasClip = async () => false;
 export const playClip = async () => false;
 export const stopClip = () => {};
 export const isPlaying = () => false;
+export const probeAudio = async () => ({ playable: false, duration: 0 });
 export const probeDuration = async () => 0;
 export const storageUsed = async () => 0;

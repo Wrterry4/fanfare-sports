@@ -1,0 +1,2 @@
+# Shell scripts must keep LF endings; CRLF breaks the bash shebang line.
+*.sh text eol=lf

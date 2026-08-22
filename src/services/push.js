@@ -17,6 +17,10 @@ export const pushSupported = () => true;
 /** Native has no install step — the OS prompt is the whole flow. */
 export const requiresInstallFirst = () => false;
 
+/** A real native app is always "installed" — there's no browser-tab state
+    to distinguish it from. */
+export const isInstalled = () => true;
+
 export async function requestPushPermission() {
   const status = await requestPermission(messaging);
   return status === AuthorizationStatus.AUTHORIZED ||

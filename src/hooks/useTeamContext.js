@@ -18,8 +18,7 @@ import {
   db, doc, collection, query, orderBy, limit, onSnapshot, getDoc, getDocs,
 } from '../services/firebase';
 import { useTeams } from './useTeams.js';
-import { buildGameConfig } from '../sports/baseball/config.js';
-import { resolveRules } from '../sports/baseball/rules.js';
+import { sportForTeam } from '../sports/registry.js';
 
 export function useTeamContext() {
   const { teams, loading: teamsLoading } = useTeams();
@@ -81,7 +80,7 @@ export function useTeamContext() {
 
   // ---- engine inputs -----------------------------------------------------
   const rules = useMemo(
-    () => resolveRules(game?.rulesSnapshot ?? team?.rules ?? {}),
+    () => sportForTeam(team).resolveRules(game?.rulesSnapshot ?? team?.rules ?? {}),
     [game?.rulesSnapshot, team?.rules]
   );
 
@@ -92,7 +91,7 @@ export function useTeamContext() {
     const lineup = (game.lineup?.length ? game.lineup : roster.map((r, i) => ({
       playerId: r.playerId, battingOrder: i + 1, position: r.primaryPosition,
     })));
-    return buildGameConfig({ ...game, lineup });
+    return sportForTeam(team).buildGameConfig({ ...game, lineup });
   }, [game, roster]);
 
   const names = useMemo(() => Object.fromEntries(

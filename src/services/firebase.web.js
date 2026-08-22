@@ -34,7 +34,7 @@ import { getStorage } from 'firebase/storage';
 export {
   collection, doc, query, orderBy, limit, where,
   onSnapshot, addDoc, setDoc, getDoc, getDocs, updateDoc, deleteDoc,
-  serverTimestamp, writeBatch, increment, arrayUnion, deleteField,
+  serverTimestamp, writeBatch, increment, arrayUnion, arrayRemove, deleteField,
 } from 'firebase/firestore';
 export { httpsCallable } from 'firebase/functions';
 export {

@@ -20,6 +20,7 @@ import { registerDevice } from '../services/authService.js';
 import { requiresInstallFirst, pushSupported } from '../services/push';
 import { notify } from '../utils/confirm.js';
 import { call } from '../services/callable.js';
+import InstallGuideSheet from './InstallGuideSheet.jsx';
 import { colors, radius, spacing, text } from '../theme/tokens.js';
 
 const ROWS = [
@@ -37,6 +38,7 @@ export default function NotificationSettings({ team, member, isFan }) {
   const [prefs, setPrefs] = useState({});
   const [granted, setGranted] = useState(null);
   const [status, setStatus] = useState(null);
+  const [showGuide, setShowGuide] = useState(false);
 
   useEffect(() => { setPrefs(member?.notificationPrefs ?? {}); }, [member]);
 
@@ -71,8 +73,10 @@ export default function NotificationSettings({ team, member, isFan }) {
     switch (result.reason) {
       case 'needs_install':
         setStatus('Add Fanfare to your home screen first');
-        notify('Add to Home Screen first',
-          'On iPhone, notifications only work from the installed app. Tap Share, then "Add to Home Screen", and open Fanfare from there.');
+        // A one-line browser alert used to stand in for this. Real,
+        // numbered steps with the actual Share icon get someone through it
+        // instead of leaving them to guess what "Add to Home Screen" means.
+        setShowGuide(true);
         break;
       case 'denied':
         setStatus('Blocked by your browser');
@@ -126,8 +130,18 @@ export default function NotificationSettings({ team, member, isFan }) {
                 ? 'Get a buzz when your player is up, and when games start and end.'
                 : 'This browser does not support notifications.'}
           </Text>
+          {requiresInstallFirst() && (
+            <Pressable
+              onPress={(e) => { e?.stopPropagation?.(); setShowGuide(true); }}
+              style={styles.guideLink} hitSlop={6}
+            >
+              <Text style={styles.guideLinkText}>Show me how ›</Text>
+            </Pressable>
+          )}
         </Pressable>
       )}
+
+      <InstallGuideSheet visible={showGuide} onClose={() => setShowGuide(false)} />
 
       {granted && (
         <Pressable onPress={sendTest} style={styles.test}>
@@ -167,6 +181,8 @@ const styles = StyleSheet.create({
   },
   enableTitle: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 14, color: colors.navy },
   enableBody: { ...text.body, fontSize: 12, color: colors.pencil, marginTop: 4, lineHeight: 17 },
+  guideLink: { marginTop: 8 },
+  guideLinkText: { ...text.bodyStrong, fontSize: 12, color: colors.primary },
   test: {
     height: 42, borderRadius: radius.md, borderWidth: 1, borderColor: colors.primary,
     alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm,

@@ -4,16 +4,18 @@
   "private": true,
   "main": "expo/AppEntry.js",
   "scripts": {
-    "test": "node tests/engine.test.js && node tests/finalize.test.js && node tests/invites.test.js && node tests/scoringModes.test.js",
+    "test": "node tests/firebaseExports.test.js && node tests/activeTeamResolution.test.js && node tests/momentDetection.test.js && node tests/buildLabel.test.js && node scripts/check-hooks.mjs && node tests/engine.test.js && node tests/finalize.test.js && node tests/invites.test.js && node tests/scoringModes.test.js && node tests/summary.test.js && node tests/attendance.test.js && node tests/statsAccess.test.js && node tests/teamGrouping.test.js && node tests/gameReadiness.test.js && node tests/audioProbe.test.js && node tests/pushEligibility.test.js && node tests/soundboardCatalog.test.js && node tests/scheduleFilters.test.js && node tests/basketball.test.js && node tests/gameIdentity.test.js && node tests/serverDispatch.test.js && node tests/sportContract.test.js && node tests/functionsLoad.test.js",
     "test:rules": "firebase emulators:exec --only firestore \"vitest run tests/rules\"",
     "prototype": "node build-prototype.mjs",
     "lint:jsx": "esbuild App.jsx --loader:.jsx=jsx --outfile=/dev/null",
     "android": "react-native run-android",
     "ios": "react-native run-ios",
     "web": "expo start --web",
-    "build:web": "expo export --platform web && node scripts/finalize-web.mjs",
+    "build:web": "node scripts/stamp-build.mjs && expo export --platform web && node scripts/finalize-web.mjs",
     "deploy:web": "npm run build:web && firebase deploy --only hosting",
-    "deploy:backend": "firebase deploy --only firestore:rules,storage:rules,firestore:indexes,functions"
+    "deploy:backend": "firebase deploy --only firestore:rules,storage:rules,firestore:indexes,functions",
+    "predeploy:check": "node functions/build-shared.js && node tests/functionsLoad.test.js",
+    "check": "node scripts/check-imports.mjs && node scripts/check-tdz.mjs && node scripts/check-hooks.mjs"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "1.23.1",

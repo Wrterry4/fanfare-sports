@@ -9,6 +9,7 @@
 
 import { useEffect, useState } from 'react';
 import { db, doc, onSnapshot } from '../services/firebase';
+import { normalizeRole } from '../shared/inviteRules.js';
 import { useAuth } from './AuthProvider.jsx';
 import { useActiveTeam } from './ActiveTeam.jsx';
 
@@ -26,7 +27,8 @@ export function useMyRole() {
       () => { setMember(null); setLoading(false); });
   }, [team?.id, user?.uid]);
 
-  const role = member?.role ?? null;
+  // Normalized once, so nothing downstream has to know about retired roles.
+  const role = normalizeRole(member?.role ?? null);
   return {
     member,
     role,
@@ -34,7 +36,9 @@ export function useMyRole() {
     isStaff: role === 'owner' || role === 'coach',
     isOwner: role === 'owner',
     isFan: role === 'fan',
-    canScore: ['owner', 'coach', 'scorekeeper', 'parent'].includes(role),
+    // 'scorekeeper' is a retired role; members still carrying it normalize to
+    // parent, which can score. Who is scoring RIGHT NOW is the baton.
+    canScore: ['owner', 'coach', 'parent'].includes(role),
     linkedPlayerIds: member?.linkedPlayerIds ?? [],
   };
 }

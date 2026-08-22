@@ -5,6 +5,11 @@
  * don't say which is which at a glance — but "Jack" and "Maya" do. This maps
  * teamId to the players you're linked to there, so the team switcher can lead
  * with the name that actually identifies it.
+ *
+ * Also returns your ROLE on each team, which comes free — it's a field on the
+ * same member document this already subscribes to. The switcher uses it to
+ * label teams where you have no child: "Also coaching" is wrong for someone
+ * who only keeps the book.
  */
 
 import { useEffect, useState } from 'react';
@@ -14,16 +19,19 @@ import { useAuth } from './AuthProvider.jsx';
 export function useMyTeamPlayers(teams) {
   const { user } = useAuth();
   const [byTeam, setByTeam] = useState({});
+  const [roleByTeam, setRoleByTeam] = useState({});
 
   const key = (teams || []).map((t) => t.id).join(',');
 
   useEffect(() => {
-    if (!user?.uid || !teams?.length) { setByTeam({}); return undefined; }
+    if (!user?.uid || !teams?.length) { setByTeam({}); setRoleByTeam({}); return undefined; }
     let cancelled = false;
 
     const unsubs = teams.map((t) =>
       onSnapshot(doc(db, 'teams', t.id, 'members', user.uid), async (snap) => {
-        const ids = snap.data()?.linkedPlayerIds || [];
+        const member = snap.data() || {};
+        if (!cancelled) setRoleByTeam((m) => ({ ...m, [t.id]: member.role || null }));
+        const ids = member.linkedPlayerIds || [];
         if (!ids.length) {
           if (!cancelled) setByTeam((m) => ({ ...m, [t.id]: [] }));
           return;
@@ -44,5 +52,5 @@ export function useMyTeamPlayers(teams) {
     return () => { cancelled = true; unsubs.forEach((u) => u()); };
   }, [user?.uid, key]);
 
-  return byTeam;
+  return { byTeam, roleByTeam };
 }

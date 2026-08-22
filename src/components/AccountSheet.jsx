@@ -8,7 +8,7 @@
  * Slides from the left, which is where the button is.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View, Text, TextInput, Pressable, Modal, StyleSheet, ScrollView,
   ActivityIndicator, KeyboardAvoidingView, Platform,
@@ -18,6 +18,8 @@ import { db, doc, getDoc, setDoc, updateDoc, deleteDoc } from '../services/fireb
 import { useAuth } from '../hooks/AuthProvider.jsx';
 import { useActiveTeam } from '../hooks/ActiveTeam.jsx';
 import { useMyTeamPlayers } from '../hooks/useMyTeamPlayers.js';
+import { groupTeamsByPlayer, groupingIsUseful } from '../shared/teamGrouping.js';
+import NewTeamSheet from './NewTeamSheet.jsx';
 import { signOut } from '../services/authService.js';
 import { confirm, notify } from '../utils/confirm.js';
 import { colors, radius, spacing, text } from '../theme/tokens.js';
@@ -32,7 +34,15 @@ export default function AccountSheet({ visible, onClose }) {
   const [dirty, setDirty] = useState(false);
   const [renaming, setRenaming] = useState(null);
   const [newName, setNewName] = useState('');
-  const byTeam = useMyTeamPlayers(teams);
+  const [creating, setCreating] = useState(false);
+  // Role comes from the same member document as the linked players, so the
+  // unlinked group can be labelled honestly.
+  const { byTeam, roleByTeam } = useMyTeamPlayers(teams);
+
+  const grouped = useMemo(
+    () => groupTeamsByPlayer(teams, byTeam, roleByTeam),
+    [teams, byTeam, roleByTeam]);
+  const showHeadings = groupingIsUseful(grouped);
 
   useEffect(() => {
     if (!visible || !user?.uid) return;
@@ -144,7 +154,20 @@ export default function AccountSheet({ visible, onClose }) {
               <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>
                 {teams.length > 1 ? 'YOUR TEAMS' : 'YOUR TEAM'}
               </Text>
-              {teams.map((t) => {
+              {grouped.map((group) => (
+                <View key={group.key}>
+                  {/* Headings only earn their place with something to
+                      separate — one child on one team doesn't need a label
+                      above it saying so. */}
+                  {showHeadings && (
+                    <View style={styles.groupHead}>
+                      <Text style={styles.groupLabel}>{group.label}</Text>
+                      {group.sublabel && (
+                        <Text style={styles.groupSub}>{group.sublabel}</Text>
+                      )}
+                    </View>
+                  )}
+                  {group.teams.map((t) => {
                 const kids = byTeam[t.id] || [];
                 const isRenaming = renaming === t.id;
                 return (
@@ -169,7 +192,9 @@ export default function AccountSheet({ visible, onClose }) {
                           onPress={() => { select(t.id); onClose(); }}>
                           {/* Whose kid is on this team — the fastest way to tell
                               two teams apart when you're tracking more than one. */}
-                          {kids.length > 0 && (
+                          {/* Under a child's heading the name is already
+                              above; only show it when there's no heading. */}
+                          {kids.length > 0 && !showHeadings && (
                             <Text style={styles.kidLine} numberOfLines={1}>
                               {kids.map((k) => k.firstName).join(' & ')}
                             </Text>
@@ -198,10 +223,19 @@ export default function AccountSheet({ visible, onClose }) {
                     )}
                   </View>
                 );
-              })}
+                  })}
+                </View>
+              ))}
               {teams.length === 0 && (
                 <Text style={styles.hint}>You're not on a team yet.</Text>
               )}
+
+              {/* Creating a team lived only in the first-run wizard, which is
+                  unreachable once you have one. A spring team and a fall team
+                  is the ordinary case, not an edge case. */}
+              <Pressable onPress={() => setCreating(true)} style={styles.newTeam}>
+                <Text style={styles.newTeamText}>+ NEW TEAM</Text>
+              </Pressable>
 
               <Pressable onPress={doSignOut} style={[styles.cta, styles.ctaGhost]}>
                 <Text style={[styles.ctaText, { color: colors.out }]}>SIGN OUT</Text>
@@ -212,6 +246,18 @@ export default function AccountSheet({ visible, onClose }) {
 
         <Pressable style={styles.backdrop} onPress={onClose} />
       </View>
+
+      <NewTeamSheet
+        visible={creating}
+        onClose={() => setCreating(false)}
+        onCreated={(teamId) => {
+          setCreating(false);
+          // isNew tells ActiveTeam this id won't be in the teams list yet, so
+          // it holds the selection instead of bouncing back to the old team.
+          select(teamId, { isNew: true });
+          onClose();
+        }}
+      />
     </Modal>
   );
 }
@@ -243,6 +289,15 @@ const styles = StyleSheet.create({
   },
   ctaGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.line },
   ctaText: { ...text.buttonSecondary, color: '#FFF', letterSpacing: 0.8 },
+  groupHead: { marginTop: spacing.sm, marginBottom: 6 },
+  groupLabel: { ...text.label, fontSize: 9, color: colors.primary },
+  groupSub: { ...text.body, fontSize: 10.5, color: colors.pencil, marginTop: 2 },
+  newTeam: {
+    height: 46, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line,
+    borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center',
+    marginTop: 2,
+  },
+  newTeamText: { ...text.buttonSecondary, fontSize: 11, color: colors.pencil, letterSpacing: 0.7 },
   teamRow: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line,

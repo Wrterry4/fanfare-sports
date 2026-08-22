@@ -12,7 +12,7 @@
  *
  * What the code grants and doesn't:
  *   grants  — team membership, chat, schedule, live game viewing, and (for
- *             scorekeeper/coach roles) the ability to request the book
+ *             coach/parent roles) the ability to request the book
  *   doesn't — guardianship of any child, or access to another family's stats
  *
  * A parent still has to be linked to their child by a coach, which is a
@@ -29,9 +29,8 @@ import { currentUid } from './authService.js';
 export const ROLE_LABELS = {
   owner: 'Head coach',
   coach: 'Coach',
-  scorekeeper: 'Scorekeeper',
   parent: 'Parent',
-  fan: 'Family',
+  fan: 'Fan',
 };
 
 const DEFAULT_PREFS = {

@@ -20,7 +20,9 @@ export async function createEvent(teamId, data, rules) {
     opponent: type === EVENT_TYPES.GAME ? (data.opponent?.trim() || null) : null,
     homeOrAway: type === EVENT_TYPES.GAME ? (data.homeOrAway || 'home') : null,
     date: data.date || serverTimestamp(),
-    park: data.park?.trim() || null,
+    // Written as `location` now; venueOf() still reads the old `park` key on
+    // documents created before the rename.
+    location: (data.location ?? data.park)?.trim() || null,
     field: data.field?.trim() || null,
     notes: data.notes?.trim() || null,
 

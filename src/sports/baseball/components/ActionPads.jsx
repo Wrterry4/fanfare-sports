@@ -45,7 +45,7 @@ const LABELS = {
   [EV.REACHED_ON_ERROR]: 'Error',
 };
 
-function Key({ label, onPress, variant, disabled }) {
+function Key({ label, onPress, variant, disabled, compact }) {
   const handle = useCallback(() => {
     // Confirmation you can feel, so the scorekeeper doesn't look down to check
     // the tap registered. No-ops on iOS Safari, which has never shipped the
@@ -66,6 +66,10 @@ function Key({ label, onPress, variant, disabled }) {
         variant === 'strike' && styles.keyStrike,
         variant === 'hit' && styles.keyHit,
         variant === 'out' && styles.keyOut,
+        compact && (variant === 'pitch' || variant === 'strike')
+          ? styles.keyPrimaryCompact : null,
+        compact && (variant === 'hit' || variant === 'out')
+          ? styles.keySecondaryCompact : null,
         pressed && styles.keyPressed,
         disabled && styles.keyDisabled,
       ]}
@@ -84,17 +88,23 @@ function PadLabel({ children }) {
   return <Text style={styles.padLabel}>{children}</Text>;
 }
 
-function ActionPads({ state, mode, homeOrAway, rules, onEvent, onMore, onUndo, disabled }) {
+function ActionPads({ state, mode, homeOrAway, rules, onEvent, onMore, onUndo, disabled, compact }) {
   const pitching = weArePitching(state.isTop, homeOrAway);
   const groups = getVisibleControls(mode, pitching);
   const showPitch = !!groups[CONTROL_GROUPS.PITCH];
   const showTally = showsPitchTally(mode, pitching);
-  const pitcherId = state.pitchers[state.isTop ? 'home' : 'away'];
-  const pitchCount = state.pitchCounts[pitcherId] ?? 0;
+  // Defaulted rather than indexed directly — see the matching note in
+  // present.js. This component receives `state` straight from GameDayScreen
+  // with no presenter layer in between, so it was never covered by the
+  // guards added there; it's the same class of bug in a different file.
+  const pitchers = state.pitchers || {};
+  const pitchCounts = state.pitchCounts || {};
+  const pitcherId = pitchers[state.isTop ? 'home' : 'away'];
+  const pitchCount = pitchCounts[pitcherId] ?? 0;
   const overLimit = !!rules?.maxPitchesPerOuting && pitchCount >= rules.maxPitchesPerOuting;
 
   return (
-    <View style={styles.pads}>
+    <View style={[styles.pads, compact && styles.padsCompact]}>
       {showPitch && (
         <>
           <PadLabel>
@@ -107,6 +117,7 @@ function ActionPads({ state, mode, homeOrAway, rules, onEvent, onMore, onUndo, d
                 label={LABELS[ev]}
                 variant={ev === EV.STRIKE_SWINGING ? 'strike' : 'pitch'}
                 disabled={disabled}
+                compact={compact}
                 onPress={() => onEvent(ev)}
               />
             ))}
@@ -123,7 +134,9 @@ function ActionPads({ state, mode, homeOrAway, rules, onEvent, onMore, onUndo, d
           <Pressable
             onPress={() => { tapMedium(); onEvent(EV.PITCH_TALLY); }}
             disabled={disabled}
-            style={({ pressed }) => [styles.tally, pressed && styles.keyPressed,
+            style={({ pressed }) => [styles.tally,
+                                     compact && styles.keyPrimaryCompact,
+                                     pressed && styles.keyPressed,
                                      overLimit && styles.tallyOver]}
             accessibilityRole="button"
             accessibilityLabel="Count one pitch"
@@ -139,7 +152,7 @@ function ActionPads({ state, mode, homeOrAway, rules, onEvent, onMore, onUndo, d
       <PadLabel>On base</PadLabel>
       <View style={styles.grid}>
         {groups[CONTROL_GROUPS.ON_BASE].map((ev) => (
-          <Key key={ev} label={LABELS[ev]} variant="hit"
+          <Key key={ev} label={LABELS[ev]} variant="hit" compact={compact}
                disabled={disabled} onPress={() => onEvent(ev)} />
         ))}
       </View>
@@ -147,7 +160,7 @@ function ActionPads({ state, mode, homeOrAway, rules, onEvent, onMore, onUndo, d
       <PadLabel>Out</PadLabel>
       <View style={styles.grid}>
         {groups[CONTROL_GROUPS.OUT].map((ev) => (
-          <Key key={ev} label={LABELS[ev]} variant="out"
+          <Key key={ev} label={LABELS[ev]} variant="out" compact={compact}
                disabled={disabled} onPress={() => onEvent(ev)} />
         ))}
       </View>
@@ -170,6 +183,9 @@ function ActionPads({ state, mode, homeOrAway, rules, onEvent, onMore, onUndo, d
 
 const styles = StyleSheet.create({
   pads: { paddingHorizontal: spacing.md, paddingBottom: spacing.md, gap: spacing.sm },
+  // Trims roughly 40pt off the stack without dropping a control or taking any
+  // key below Android's 48pt minimum target.
+  padsCompact: { paddingBottom: spacing.sm, gap: 5 },
   padLabel: { ...text.label, color: colors.pencil, paddingLeft: 3, marginBottom: -2 },
   // Three per row, wrapping. basis 31% leaves room for two gaps.
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
@@ -192,6 +208,8 @@ const styles = StyleSheet.create({
   // "Fielder's Choice" needs two lines at this width.
   keyPressed: { transform: [{ scale: 0.965 }], backgroundColor: '#F0EDE6' },
   keyDisabled: { opacity: 0.4 },
+  keyPrimaryCompact: { height: 50 },
+  keySecondaryCompact: { height: 42 },
 
   keyText: {
     ...text.buttonSecondary, color: colors.navy,

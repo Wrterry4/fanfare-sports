@@ -127,24 +127,97 @@ export function stopClip() {
 
 export const isPlaying = () => !!current && !current.paused;
 
-/** Duration of a picked file, so the trim UI knows its bounds. */
-export function probeDuration(blob) {
+/**
+ * Whether a file will play, and its duration if the browser can determine
+ * one — two different questions this used to conflate into one.
+ *
+ * The old version rejected a file outright whenever `duration` came back as
+ * anything other than a finite positive number, and treated "unknown
+ * duration" and "actually broken" as the same failure. That's wrong on two
+ * counts:
+ *
+ *   Many real, playable files — VBR-encoded MP3s especially, which is what
+ *   a phone's voice memo app and a lot of web downloads produce — report
+ *   `duration: Infinity` until the browser has scanned toward the end of the
+ *   file. Nothing is wrong with the file; the browser just hasn't finished
+ *   measuring it yet. Rejecting on Infinity meant rejecting ordinary MP3s.
+ *
+ *   Some formats load and play fine but never resolve a duration at all in
+ *   this API. Not knowing the length isn't a reason to refuse the file —
+ *   it's a reason to show "—" instead of a number and let the person hear
+ *   for themselves whether it's right.
+ *
+ * `playable` is the only thing that gates whether a save is allowed now, and
+ * it's false ONLY on a genuine decode error or a timeout with zero signal at
+ * all — not on an odd or missing duration.
+ */
+/**
+ * The actual decision, pulled out as a pure function so it's testable
+ * without a real `Audio` element and browser events. probeAudio's job is
+ * just wiring browser events to this.
+ */
+export function resolvePlayability({ duration, errored, sawAnySignal }) {
+  if (errored) return { playable: false, duration: 0 };
+  if (Number.isFinite(duration) && duration > 0) return { playable: true, duration };
+  // No usable duration, but something loaded without erroring — still
+  // counts as playable. The length just isn't known, which is common enough
+  // for real files that it shouldn't block the save.
+  return { playable: sawAnySignal, duration: 0 };
+}
+
+export function probeAudio(blob) {
   return new Promise((resolve) => {
     const url = URL.createObjectURL(blob);
     const a = new Audio(url);
     let settled = false;
-    const done = (v) => {
+    let sawAnySignal = false;
+
+    const done = (result) => {
       if (settled) return;
       settled = true;
       URL.revokeObjectURL(url);
-      resolve(v);
+      resolve(result);
     };
-    a.onloadedmetadata = () => done(Number.isFinite(a.duration) ? a.duration : 0);
-    a.onerror = () => done(0);
-    // Some formats neither load nor error — they just never fire. Without a
-    // timeout the picker would sit on a spinner forever.
-    setTimeout(() => done(0), 8000);
+
+    const finalize = () => {
+      const result = resolvePlayability({ duration: a.duration, errored: false, sawAnySignal });
+      if (result.playable && result.duration > 0) { done(result); return true; }
+      return false;
+    };
+
+    a.onloadedmetadata = () => {
+      sawAnySignal = true;
+      if (finalize()) return;
+      if (a.duration === Infinity) {
+        // The classic VBR MP3 quirk: seeking far forward forces the browser
+        // to scan the file and resolve the real duration, reported via
+        // ontimeupdate once the seek lands.
+        a.currentTime = 1e7;
+        return;
+      }
+      done(resolvePlayability({ duration: a.duration, errored: false, sawAnySignal }));
+    };
+    a.ondurationchange = () => { if (!settled) finalize(); };
+    a.ontimeupdate = () => {
+      a.ontimeupdate = null;
+      a.currentTime = 0;
+      if (!finalize()) done(resolvePlayability({ duration: a.duration, errored: false, sawAnySignal }));
+    };
+    a.oncanplaythrough = () => { sawAnySignal = true; };
+    a.onerror = () => done(resolvePlayability({ duration: 0, errored: true, sawAnySignal }));
+    // Some formats neither load nor error — they just never fire anything.
+    // Without a timeout the picker would sit on a spinner forever. If we saw
+    // ANY signal before timing out, treat it as playable with an unknown
+    // length rather than failing a file that was clearly loading.
+    setTimeout(() => done(resolvePlayability({ duration: 0, errored: false, sawAnySignal })), 8000);
   });
+}
+
+/** Kept for any caller that only wants a number. Prefer probeAudio()  — this
+    can't tell "unknown length" apart from "won't play." */
+export async function probeDuration(blob) {
+  const { duration } = await probeAudio(blob);
+  return duration;
 }
 
 /** Total bytes held, so the roster screen can warn before a phone fills up. */

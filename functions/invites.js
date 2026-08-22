@@ -20,15 +20,16 @@
  */
 
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
-import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { FieldValue } from 'firebase-admin/firestore';
 import { createHash, randomBytes } from 'crypto';
+
+import { db } from './firebase-init.js';
 
 import {
   ROLES, INVITE_TYPES, INVITE_ERRORS, INVITE_ERROR_MESSAGES,
   validateInvite, resolveRole, defaultNotificationPrefs, buildInviteUrl,
 } from './shared/common/inviteRules.js';
 
-const db = getFirestore();
 
 const APP_URL = process.env.APP_BASE_URL || 'https://fanfaresports.app';
 const DAY = 86400000;

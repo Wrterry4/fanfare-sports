@@ -30,15 +30,16 @@ import AccountSheet from '../components/AccountSheet.jsx';
 import { useMyRole } from '../hooks/useMyRole.js';
 import DraggableList, { ROW_HEIGHT } from '../components/DraggableList.jsx';
 import LinkParentSheet from '../components/LinkParentSheet.jsx';
+import PlayerCardScreen from './PlayerCardScreen.jsx';
+import { sportForTeam } from '../sports/registry.js';
 import { requestPlayerClaim, subscribeMyClaims } from '../services/membership.js';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 import { inputStyle } from '../theme/inputs.js';
 
-const POSITIONS = ['P','C','1B','2B','3B','SS','LF','CF','RF','DH'];
 
 export default function RosterScreen() {
   const { team, game, allGames, roster, loading } = useGameDay();
-  const { isStaff } = useMyRole();
+  const { isStaff, isFan } = useMyRole();
   const [tab, setTab] = useState('roster');
   const [adding, setAdding] = useState(false);
   const [menu, setMenu] = useState(false);
@@ -56,13 +57,24 @@ export default function RosterScreen() {
               onPress={() => setAdding((a) => !a)} />
           : null}
       />
-      <SegmentedTabs
-        options={[['roster', 'Roster'], ['lineup', 'Lineup']]}
-        value={tab} onChange={setTab}
-      />
+      {/* Fans see the roster but not the Lineup tab, which is every game's
+          batting order past and future. Their view of a lineup is the live one
+          on Game Day — who's up today, not how the coach plans to bat the
+          team in three weeks.
+
+          This is a UI restriction, not an enforced one: `lineup` is a field on
+          the game document and Firestore rules are document-level, so hiding a
+          single field isn't possible without moving lineups into their own
+          subdocument. Worth doing if it ever needs to be airtight. */}
+      {!isFan && (
+        <SegmentedTabs
+          options={[['roster', 'Roster'], ['lineup', 'Lineup']]}
+          value={tab} onChange={setTab}
+        />
+      )}
       <AccountSheet visible={menu} onClose={() => setMenu(false)} />
 
-      {tab === 'roster'
+      {tab === 'roster' || isFan
         ? <RosterTab team={team} roster={roster} adding={adding} onDoneAdding={() => setAdding(false)} />
         : <LineupTab team={team} games={allGames} currentGame={game} roster={roster} />}
     </SafeAreaView>
@@ -77,6 +89,7 @@ function RosterTab({ team, roster, adding, onDoneAdding }) {
   const [editingId, setEditingId] = useState(null);
   const [walkUp, setWalkUp] = useState(null);
   const [linkFor, setLinkFor] = useState(null);
+  const [cardFor, setCardFor] = useState(null);
   const [withAudio, setWithAudio] = useState({});
 
   useEffect(() => {
@@ -141,6 +154,7 @@ function RosterTab({ team, roster, adding, onDoneAdding }) {
             linked={linkedPlayerIds.includes(p.playerId)}
             pendingClaim={!!claimFor(p.playerId)}
             onClaim={(kind) => claim(p, kind)}
+            onStats={() => setCardFor(p)}
             onToggle={() => setEditingId(editingId === p.playerId ? null : p.playerId)}
             onWalkUp={() => setWalkUp(p)}
             onLink={() => setLinkFor(p)}
@@ -148,6 +162,13 @@ function RosterTab({ team, roster, adding, onDoneAdding }) {
           />
         ))}
       </ScrollView>
+
+      <PlayerCardScreen
+        visible={!!cardFor}
+        player={cardFor}
+        team={team}
+        onClose={() => setCardFor(null)}
+      />
 
       <LinkParentSheet
         visible={!!linkFor}
@@ -169,6 +190,9 @@ function RosterTab({ team, roster, adding, onDoneAdding }) {
 
 /** Stays open across saves and refocuses the number field. */
 function AddPlayerForm({ team, onDone }) {
+  // Baseball offers P/C/1B/…, basketball PG/SG/SF/PF/C. The list belongs to
+  // the sport, not to this screen.
+  const positions = sportForTeam(team).POSITIONS || [];
   const [first, setFirst] = useState('');
   const [last, setLast] = useState('');
   const [jersey, setJersey] = useState('');
@@ -204,6 +228,7 @@ function AddPlayerForm({ team, onDone }) {
         first={first} setFirst={setFirst}
         last={last} setLast={setLast}
         position={position} setPosition={setPosition}
+        positions={positions}
         onSubmit={save}
       />
       <View style={styles.formBtns}>
@@ -220,7 +245,8 @@ function AddPlayerForm({ team, onDone }) {
 
 /** Tapping a row expands it in place. */
 function PlayerRow({ player, team, expanded, hasAudio, canEdit, linked, pendingClaim,
-                     onClaim, onToggle, onWalkUp, onLink, onRemove }) {
+                     onClaim, onToggle, onWalkUp, onLink, onRemove, onStats }) {
+  const positions = sportForTeam(team).POSITIONS || [];
   const [first, setFirst] = useState(player.firstName || '');
   const [last, setLast] = useState(player.lastName || '');
   const [jersey, setJersey] = useState(player.jerseyNumber != null ? String(player.jerseyNumber) : '');
@@ -267,6 +293,13 @@ function PlayerRow({ player, team, expanded, hasAudio, canEdit, linked, pendingC
             {hasAudio ? ' · walk-up set' : ''}
           </Text>
         </View>
+        {/* Open to every member, fans included — the card is a team-wide
+            scorebook, so gating this on canEdit or linked would contradict it. */}
+        <Pressable onPress={onStats} style={styles.iconBtn} hitSlop={6}
+                   accessibilityRole="button"
+                   accessibilityLabel={`${player.firstName}'s stats`}>
+          <Text style={styles.iconBtnText}>📊</Text>
+        </Pressable>
         {(canEdit || linked) && (
           <Pressable onPress={onWalkUp} style={[styles.iconBtn, hasAudio && styles.iconBtnOn]}>
             <Text style={[styles.iconBtnText, hasAudio && styles.iconBtnTextOn]}>♪</Text>
@@ -292,7 +325,7 @@ function PlayerRow({ player, team, expanded, hasAudio, canEdit, linked, pendingC
                   <Text style={styles.ctaText}>I'M A PARENT</Text>
                 </Pressable>
                 <Pressable onPress={() => onClaim('fan')} style={[styles.cta, styles.ctaGhost]}>
-                  <Text style={[styles.ctaText, { color: colors.pencil }]}>FAMILY</Text>
+                  <Text style={[styles.ctaText, { color: colors.pencil }]}>I'M A FAN</Text>
                 </Pressable>
               </View>
             </>
@@ -307,6 +340,7 @@ function PlayerRow({ player, team, expanded, hasAudio, canEdit, linked, pendingC
             first={first} setFirst={setFirst}
             last={last} setLast={setLast}
             position={position} setPosition={setPosition}
+            positions={positions}
             onSubmit={save}
           />
           <Pressable onPress={onLink} style={[styles.cta, styles.ctaGhost, { marginBottom: spacing.sm }]}>
@@ -330,7 +364,7 @@ function PlayerRow({ player, team, expanded, hasAudio, canEdit, linked, pendingC
 }
 
 function PlayerFields({ jerseyRef, jersey, setJersey, first, setFirst, last, setLast,
-                        position, setPosition, onSubmit }) {
+                        position, setPosition, onSubmit, positions = [] }) {
   return (
     <>
       <View style={styles.row}>
@@ -355,7 +389,7 @@ function PlayerFields({ jerseyRef, jersey, setJersey, first, setFirst, last, set
 
       <Text style={[styles.label, { marginTop: spacing.md }]}>Position</Text>
       <View style={styles.chips}>
-        {POSITIONS.map((p) => (
+        {positions.map((p) => (
           <Pressable key={p} onPress={() => setPosition(p === position ? null : p)}
             style={[styles.chip, position === p && styles.chipOn]}>
             <Text style={[styles.chipText, position === p && styles.chipTextOn]}>{p}</Text>

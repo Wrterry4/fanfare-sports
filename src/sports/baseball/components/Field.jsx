@@ -40,7 +40,11 @@ function Base({ base, runner, jersey, onPress }) {
   );
 }
 
-function Diamond({ bases, jerseyFor, onPressRunner, size = 250, interactive = true }) {
+function Diamond({ state, bases: basesProp, jerseyFor, onPressRunner, size = 250, interactive = true }) {
+  // Takes the whole game state now, because the shared screen shouldn't have
+  // to know that baseball tracks bases in order to pass them in. The explicit
+  // `bases` prop is kept so this stays usable on its own in a test.
+  const bases = basesProp ?? state?.bases ?? {};
   return (
     <View style={[styles.wrap, { width: size, height: size }]}>
       <Svg viewBox="0 0 200 200" width={size} height={size}>

@@ -118,6 +118,23 @@ service cloud.firestore {
       return signedIn() && uid() in playerData(playerId).guardianUserIds;
     }
     /**
+     * Who may read this child's STATS — a wider set than who may read the
+     * child's record.
+     *
+     * statsViewerUids is maintained by syncPlayerAccess and holds every member
+     * of every team this player is rostered on, at any role. That's a
+     * deliberate product decision: a scorebook the whole team can read.
+     *
+     * It is emphatically NOT the same as authorizedUserIds. The /players
+     * document carries birth year, guardian ids and media consent, and stays
+     * gated to authorizedUserIds. Only the stat subcollections use this.
+     */
+    function canSeeStats(playerId) {
+      return signedIn()
+             && (uid() in playerData(playerId).authorizedUserIds
+                 || uid() in playerData(playerId).statsViewerUids);
+    }
+    /**
      * Rules can't iterate, so "staff of any team this player is rostered on"
      * can't be computed here. It doesn't need to be: authorizedUserIds already
      * holds exactly that set — guardians plus the staff of every rostered team
@@ -145,17 +162,26 @@ service cloud.firestore {
                     // grant themselves or others access to a child.
                     && !request.resource.data.diff(resource.data).affectedKeys()
                          .hasAny(['authorizedUserIds', 'guardianUserIds',
-                                  'rosteredTeamIds']);
+                                  'statsViewerUids', 'rosteredTeamIds']);
       allow delete: if false;
 
       // Season and career stats. Separate documents specifically so this
       // rule can exist.
       match /seasons/{seasonKey} {
-        allow read:  if canSeePlayer(playerId);
+        /**
+         * Membership is checked DIRECTLY against the team named on the
+         * document, so this needs no denormalized viewer list and no sync.
+         *
+         * canSeeStats() is kept as the second branch for the family of a
+         * player who has left the team — they should keep seeing the season
+         * their child actually played.
+         */
+        allow read:  if (resource.data.teamId != null && isMember(resource.data.teamId))
+                     || canSeeStats(playerId);
         allow write: if false;                 // Cloud Function on finalize
       }
       match /career/{docId} {
-        allow read:  if canSeePlayer(playerId);
+        allow read:  if canSeeStats(playerId);
         allow write: if false;
       }
 
@@ -163,7 +189,7 @@ service cloud.firestore {
       // player. This is what surfaces "threw 61 pitches Thursday" to a coach
       // whose team isn't the one that pitched him.
       match /pitchingAppearances/{appearanceId} {
-        allow read:  if canSeePlayer(playerId);
+        allow read:  if canSeeStats(playerId);
         allow write: if false;
       }
     }
@@ -247,7 +273,7 @@ service cloud.firestore {
                           get(/databases/$(database)/documents/teams/$(teamId))
                             .data.createdBy == uid())
                       || (uid() == memberUid
-                          && request.resource.data.role in ['parent','fan','scorekeeper','coach']
+                          && request.resource.data.role in ['parent','fan','coach']
                           && request.resource.data.joinCode ==
                              get(/databases/$(database)/documents/teams/$(teamId)).data.joinCode);
         allow update: if isStaff(teamId)

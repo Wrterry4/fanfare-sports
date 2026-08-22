@@ -113,7 +113,6 @@ export function describeInvite(preview) {
       `live games, alerts when they're up, and their stats.`;
   }
   if (role === ROLES.COACH)       return `You'll join ${team} as a coach.`;
-  if (role === ROLES.SCOREKEEPER) return `You'll join ${team} and be able to keep the book.`;
   return `You'll join ${team}.`;
 }
 

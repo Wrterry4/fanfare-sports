@@ -15,7 +15,7 @@ import { Platform } from 'react-native';
 export {
   collection, doc, query, orderBy, limit, where,
   onSnapshot, addDoc, setDoc, getDoc, getDocs, updateDoc, deleteDoc,
-  serverTimestamp, writeBatch, increment, arrayUnion, deleteField,
+  serverTimestamp, writeBatch, increment, arrayUnion, arrayRemove, deleteField,
 } from '@react-native-firebase/firestore';
 export { httpsCallable } from '@react-native-firebase/functions';
 export {
