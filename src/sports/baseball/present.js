@@ -420,11 +420,11 @@ export function describeMoment(event, state, { personFor } = {}) {
 
   switch (event.type) {
     case EV.HOME_RUN:
-      return { text: first ? `${first.toUpperCase()} HOMERS!` : 'HOME RUN!', tone: 'big' };
+      return { text: first ? `${first.toUpperCase()} GOES YARD!` : "IT'S OUTTA HERE!", tone: 'big' };
     case EV.TRIPLE:
-      return { text: first ? `${first.toUpperCase()} TRIPLES!` : 'TRIPLE!', tone: 'good' };
+      return { text: first ? `${first.toUpperCase()} RIPS A TRIPLE!` : 'STAND-UP TRIPLE!', tone: 'good' };
     case EV.STRIKEOUT:
-      return { text: 'STRIKEOUT!', tone: 'good' };
+      return { text: 'STRIKE THREE!', tone: 'good' };
     default:
       return null;
   }
