@@ -9,6 +9,6 @@
 
 export const BUILD_INFO = {
   "version": "0.1.0",
-  "builtAt": "2026-08-22T15:01:02.001Z",
-  "commit": "14c5296"
+  "builtAt": "2026-08-22T15:43:31.858Z",
+  "commit": "3c0d9ba"
 };
