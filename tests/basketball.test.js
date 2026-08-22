@@ -322,6 +322,52 @@ group('describeMoment — celebration banners');
   const earlyState = reduce([log[0], log[1]], rules, cfg5);
   ok('an early foul on the same player is not a moment',
     present.describeMoment(firstFoul, earlyState, { personFor }) === null);
+
+  // ── Phrase rotation ────────────────────────────────────────────────────
+  const threes = new Set();
+  const blocks = new Set();
+  for (let seq = 1; seq <= 20; seq++) {
+    threes.add(present.describeMoment(
+      { seq, type: EV.MADE_3, payload: { playerId: 'p1' } }, {}, { personFor }).text);
+    blocks.add(present.describeMoment(
+      { seq, type: EV.BLOCK, payload: { playerId: 'p1' } }, {}, { personFor }).text);
+  }
+  ok('made threes do not all read the same', threes.size > 1);
+  ok('blocks do not all read the same', blocks.size > 1);
+
+  // Same event on two devices must produce the same line — the reason the
+  // pick is seeded on seq instead of random. See sports/pickPhrase.js.
+  const three = { seq: 9, type: EV.MADE_3, payload: { playerId: 'p1' } };
+  ok('two viewers see the same phrase for one shot',
+    present.describeMoment(three, {}, { personFor }).text
+    === present.describeMoment(three, {}, { personFor }).text);
+
+  // Every entry needs a no-name twin, or some seq renders "UNDEFINED SAYS NO!"
+  const noName = () => null;
+  let clean = true;
+  for (let seq = 1; seq <= 30; seq++) {
+    for (const type of [EV.MADE_3, EV.BLOCK]) {
+      const t = present.describeMoment({ seq, type, payload: {} }, {}, { personFor: noName }).text;
+      if (!t || /undefined|null/i.test(t)) clean = false;
+    }
+  }
+  ok('no seq produces undefined/empty text without a name', clean);
+
+  // A block credits `blk` to this playerId — it's the kid who made the play,
+  // so naming them is a celebration, not a callout.
+  let blockNamed = false;
+  for (let seq = 1; seq <= 20; seq++) {
+    if (present.describeMoment({ seq, type: EV.BLOCK, payload: { playerId: 'p1' } }, {},
+      { personFor }).text.includes('JACK')) blockNamed = true;
+  }
+  ok('a block can name the player who made it', blockNamed);
+
+  // Fouling out is deliberately NOT rotated — see the comment in present.js.
+  const foulTexts = new Set();
+  for (let seq = 1; seq <= 10; seq++) {
+    foulTexts.add(present.describeMoment({ ...fifthFoul, seq }, stateAfter, { personFor }).text);
+  }
+  ok('fouling out says one plain thing, every time', foulTexts.size === 1);
 }
 
 group('Undo and void behave like baseball');

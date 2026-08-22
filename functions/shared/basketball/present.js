@@ -17,6 +17,7 @@
 
 import { EV } from './events.js';
 import { inBonus, hasFouledOut } from './rules.js';
+import { pickPhrase } from '../pickPhrase.js';
 
 const PERIOD_NAMES = { 4: ['1st', '2nd', '3rd', '4th'], 2: ['1st Half', '2nd Half'] };
 
@@ -330,6 +331,45 @@ export function describeTodayLine(live) {
 }
 
 /**
+ * What the banners can say. Same shape and rules as the baseball pack —
+ * see the pool comment there — including a no-name form for every entry,
+ * since `firstName` is regularly missing.
+ *
+ * Nothing here describes HOW the shot went in ("nothing but net", "off the
+ * glass", "pull-up"). The event records that a three was made and nothing
+ * more, so a phrase claiming any of that is wrong about as often as it's
+ * right. Same standard the strikeout pool is held to.
+ */
+const MADE_3_PHRASES = [
+  { named: (n) => `${n} FROM DEEP!`, plain: 'THREE POINTER!' },
+  { named: (n) => `${n} FOR THREE!`, plain: 'FOR THREE!' },
+  { named: (n) => `${n} BURIES IT!`, plain: 'BURIED IT!' },
+  { named: (n) => `${n} DRAINS IT!`, plain: 'DRAINED IT!' },
+  { named: (n) => `${n} FROM DOWNTOWN!`, plain: 'DOWNTOWN!' },
+  { named: (n) => `SPLASH! ${n}!`, plain: 'SPLASH!' },
+];
+
+/**
+ * Unlike a strikeout, the playerId on a block is the player who MADE it —
+ * stats credit `blk` to exactly this id — so naming them celebrates the kid
+ * who did something good rather than spotlighting one who didn't.
+ */
+const BLOCK_PHRASES = [
+  { named: (n) => `${n} REJECTS IT!`, plain: 'REJECTED!' },
+  { named: (n) => `${n} WITH THE BLOCK!`, plain: 'BLOCKED!' },
+  { named: (n) => `${n} SAYS NO!`, plain: 'DENIED!' },
+  { named: (n) => `${n} SENDS IT BACK!`, plain: 'SENT IT BACK!' },
+  { named: (n) => `${n} SWATS IT!`, plain: 'SWATTED!' },
+];
+
+/** Pick one phrase and render it with or without the name. */
+function say(pool, seq, first) {
+  const phrase = pickPhrase(pool, seq);
+  if (!phrase) return '';
+  return first && phrase.named ? phrase.named(first) : phrase.plain;
+}
+
+/**
  * A moment worth a brief animated banner for everyone watching. See the
  * matching function in baseball/present.js for how this gets triggered —
  * client-side, off the same events feed every viewer already subscribes to.
@@ -346,14 +386,20 @@ export function describeMoment(event, state, { personFor } = {}) {
   const person = playerId ? personFor?.(playerId) : null;
   const first = person?.firstName;
 
+  const upper = first?.toUpperCase();
+
   switch (event.type) {
     case EV.MADE_3:
-      return { text: first ? `${first.toUpperCase()} FROM DEEP!` : 'THREE POINTER!', tone: 'good' };
+      return { text: say(MADE_3_PHRASES, event.seq, upper), tone: 'good' };
     case EV.BLOCK:
-      return { text: 'BLOCKED!', tone: 'good' };
+      return { text: say(BLOCK_PHRASES, event.seq, upper), tone: 'good' };
     case EV.FOUL_PERSONAL:
       if (playerId && state?.fouledOut?.includes(playerId)) {
-        return { text: first ? `${first.toUpperCase()} FOULS OUT` : 'FOULED OUT', tone: 'bad' };
+        // Deliberately NOT rotated. The other pools exist because repetition
+        // makes a celebration feel canned; this is a kid being disqualified
+        // in front of a crowd, and cycling through livelier ways to announce
+        // it would read as enjoying it. One plain statement of fact is right.
+        return { text: upper ? `${upper} FOULS OUT` : 'FOULED OUT', tone: 'bad' };
       }
       return null;
     default:

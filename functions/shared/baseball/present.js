@@ -508,7 +508,10 @@ export function describeMoment(event, state, { personFor } = {}) {
       // Alternates with the general pool rather than replacing it, so a
       // three-run shot still gets to be CRUSHED IT half the time.
       if (rbi >= 2 && seq % 2 === 0) {
-        const line = say(MULTI_RUN_PHRASES, seq, first);
+        // Seeded on seq/2, not seq: only even seqs reach this branch, so
+        // seeding on seq itself would make `seq % pool.length` constant and
+        // pin every multi-run shot to the same phrase forever.
+        const line = say(MULTI_RUN_PHRASES, Math.floor(seq / 2), first);
         return { text: line.replace('{RUNS}', String(rbi)), tone: 'big' };
       }
       return { text: say(HOME_RUN_PHRASES, seq, first), tone: 'big' };
