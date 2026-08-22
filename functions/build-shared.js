@@ -39,6 +39,11 @@ const SOURCES = [
 const FILES = [
   { from: join(root, 'src/sports/sportNotify.js'), to: join(dest, 'sportNotify.js') },
   { from: join(root, 'src/sports/serverDispatch.js'), to: join(dest, 'serverDispatch.js') },
+  // Same reason as sportNotify: a pack reaches it as '../pickPhrase.js', which
+  // only resolves if it sits beside the pack folders. src/shared/ would have
+  // been the obvious home, but that vendors to shared/common/ and the pack's
+  // relative import would land on nothing in the deployed bundle.
+  { from: join(root, 'src/sports/pickPhrase.js'), to: join(dest, 'pickPhrase.js') },
 ];
 
 if (existsSync(dest)) rmSync(dest, { recursive: true });

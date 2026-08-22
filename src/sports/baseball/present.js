@@ -24,6 +24,7 @@
 
 import { EV } from './events.js';
 import { weArePitching } from './scoringModes.js';
+import { pickPhrase } from '../pickPhrase.js';
 
 /** Private here rather than imported — engine.js keeps its copy unexported. */
 const fieldingSide = (s) => (s.isTop ? 'home' : 'away');
@@ -397,6 +398,87 @@ export function describeTodayLine(live) {
 }
 
 /**
+ * What the banners can say.
+ *
+ * Each entry carries both forms because `firstName` is often missing — an
+ * unnamed player in a pickup lineup, or a name that never got filled in — and
+ * "UNDEFINED GOES YARD!" is worse than no name at all. `plain` is not a
+ * fallback bolted on afterward; it is the same call written for the case
+ * where nobody is named.
+ *
+ * Two kinds of phrase are deliberately absent from the strikeout pool:
+ * anything describing HOW the batter went down ("swing and a miss", "caught
+ * looking"), because the event records only that a strikeout happened, and
+ * a banner that guesses is wrong about half the time. Nothing here uses
+ * he/him or she/her either — the same pack runs for softball.
+ */
+const HOME_RUN_PHRASES = [
+  { named: (n) => `${n} GOES YARD!`, plain: "IT'S OUTTA HERE!" },
+  { named: (n) => `${n} GOES DEEP!`, plain: 'GONE!' },
+  { named: (n) => `${n} CRUSHED IT!`, plain: 'CRUSHED!' },
+  { named: (n) => `SEE YA, ${n}!`, plain: 'SEE YA!' },
+  { named: (n) => `${n} HITS A BOMB!`, plain: "THAT'S A BOMB!" },
+  { named: (n) => `${n} WENT DOWNTOWN!`, plain: 'DOWNTOWN!' },
+  { named: (n) => `${n} SENT IT!`, plain: 'SENT IT!' },
+];
+
+const SLAM_PHRASES = [
+  { named: (n) => `${n} — GRAND SLAM!`, plain: 'GRAND SLAM!' },
+  { named: (n) => `${n} EMPTIES THE BASES!`, plain: 'GRAND SLAM!' },
+  { named: (n) => `GRAND SLAM, ${n}!`, plain: 'BASES CLEARED!' },
+];
+
+/** {RUNS} is filled in with the actual RBI total on the play. */
+const MULTI_RUN_PHRASES = [
+  { named: (n) => `${n} — {RUNS}-RUN SHOT!`, plain: '{RUNS}-RUN SHOT!' },
+  { named: (n) => `${n} BRINGS {RUNS} HOME!`, plain: '{RUNS} COME HOME!' },
+];
+
+const TRIPLE_PHRASES = [
+  { named: (n) => `${n} RIPS A TRIPLE!`, plain: 'STAND-UP TRIPLE!' },
+  { named: (n) => `${n} LEGS OUT THREE!`, plain: 'ALL THE WAY TO THIRD!' },
+  { named: (n) => `${n} — THREE BAGGER!`, plain: 'THREE BAGGER!' },
+  { named: (n) => `${n} HITS THE GAP!`, plain: 'INTO THE GAP!' },
+  { named: (n) => `${n} DIDN'T STOP!`, plain: 'STAND-UP TRIPLE!' },
+];
+
+const STRIKEOUT_PHRASES = [
+  { named: null, plain: 'STRIKE THREE!' },
+  { named: null, plain: 'PUNCHED OUT!' },
+  { named: null, plain: "THAT'S A K!" },
+  { named: null, plain: 'SIT DOWN!' },
+  { named: null, plain: 'DEALING!' },
+];
+
+/** Pick one phrase and render it with or without the name. */
+function say(pool, seq, first) {
+  const phrase = pickPhrase(pool, seq);
+  if (!phrase) return '';
+  return first && phrase.named ? phrase.named(first) : phrase.plain;
+}
+
+/**
+ * RBI on this home run, or 0 when it can't be established.
+ *
+ * `_rbi` is a transient the engine hangs on the reduced state, so it always
+ * describes the LAST event applied — not necessarily the event being
+ * described here. If several events land between renders, the state has
+ * moved past this home run and its `_rbi` belongs to something else.
+ * Announcing a grand slam on a solo shot is exactly the kind of wrong that
+ * gets noticed from the stands, so this confirms the state's most recent
+ * play really is this home run before trusting the number.
+ */
+function homeRunRbi(event, state) {
+  if (state?._outcomeType !== EV.HOME_RUN) return 0;
+
+  const batter = event.payload?.playerId;
+  if (batter && state._batterId !== batter) return 0;
+
+  const rbi = Number(state._rbi);
+  return Number.isFinite(rbi) ? rbi : 0;
+}
+
+/**
  * A moment worth a brief animated banner for everyone watching.
  *
  * This is deliberately client-side and reuses data every viewer already has:
@@ -416,15 +498,31 @@ export function describeTodayLine(live) {
  */
 export function describeMoment(event, state, { personFor } = {}) {
   const person = event.payload?.playerId ? personFor?.(event.payload.playerId) : null;
-  const first = person?.firstName;
+  const first = person?.firstName?.toUpperCase();
+  const seq = event.seq;
 
   switch (event.type) {
-    case EV.HOME_RUN:
-      return { text: first ? `${first.toUpperCase()} GOES YARD!` : "IT'S OUTTA HERE!", tone: 'big' };
+    case EV.HOME_RUN: {
+      const rbi = homeRunRbi(event, state);
+      if (rbi === 4) return { text: say(SLAM_PHRASES, seq, first), tone: 'big' };
+      // Alternates with the general pool rather than replacing it, so a
+      // three-run shot still gets to be CRUSHED IT half the time.
+      if (rbi >= 2 && seq % 2 === 0) {
+        // Seeded on seq/2, not seq: only even seqs reach this branch, so
+        // seeding on seq itself would make `seq % pool.length` constant and
+        // pin every multi-run shot to the same phrase forever.
+        const line = say(MULTI_RUN_PHRASES, Math.floor(seq / 2), first);
+        return { text: line.replace('{RUNS}', String(rbi)), tone: 'big' };
+      }
+      return { text: say(HOME_RUN_PHRASES, seq, first), tone: 'big' };
+    }
     case EV.TRIPLE:
-      return { text: first ? `${first.toUpperCase()} RIPS A TRIPLE!` : 'STAND-UP TRIPLE!', tone: 'good' };
+      return { text: say(TRIPLE_PHRASES, seq, first), tone: 'good' };
     case EV.STRIKEOUT:
-      return { text: 'STRIKE THREE!', tone: 'good' };
+      // Deliberately never names anyone: the playerId on a strikeout is the
+      // BATTER, and putting a kid's name on the screen for striking out is a
+      // different thing from celebrating the pitcher who did it.
+      return { text: say(STRIKEOUT_PHRASES, seq, first), tone: 'good' };
     default:
       return null;
   }
