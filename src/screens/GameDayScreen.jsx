@@ -23,6 +23,8 @@ import SoundboardSheet from '../components/SoundboardSheet.jsx';
 import MomentBanner from '../components/MomentBanner.jsx';
 import { findNewMoment } from '../shared/momentDetection.js';
 import { resolveTeamColor } from '../shared/teamColors.js';
+import { describeOutcome } from '../shared/gameOutcome.js';
+import WinCelebration from '../components/WinCelebration.jsx';
 import { checkGameReadiness } from '../shared/gameReadiness.js';
 import PlayerCardScreen from './PlayerCardScreen.jsx';
 import Scoreboard from '../components/Scoreboard.jsx';
@@ -239,6 +241,25 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events, state]);
 
+  /**
+   * The final whistle, celebrated once.
+   *
+   * Fires on the TRANSITION into final, never on arriving at a game that is
+   * already over — same reasoning as the moment watermark above. Opening
+   * last Saturday's box score should not throw confetti, and a parent
+   * switching tabs during the handshake should not get it twice.
+   */
+  const [celebration, setCelebration] = useState(null);
+  const wasFinalRef = useRef(null);
+  useEffect(() => {
+    if (!state) return;
+    const isFinal = state.status === 'final';
+    const first = wasFinalRef.current === null;
+    wasFinalRef.current = isFinal;
+    if (first || !isFinal) return;
+    setCelebration(describeOutcome(state, game?.homeOrAway));
+  }, [state?.status, state, game?.homeOrAway]);
+
   if (!state) return <Centered><ActivityIndicator color={colors.primary} /></Centered>;
 
   /**
@@ -332,6 +353,13 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
           Placed first so it overlays everything below regardless of where
           in the tree it sits. */}
       <MomentBanner moment={moment} teamColor={resolveTeamColor(team)} />
+
+      <WinCelebration
+        outcome={celebration}
+        teamName={team?.name}
+        teamColor={resolveTeamColor(team)}
+        onDismiss={() => setCelebration(null)}
+      />
 
       {/* Inning, count and outs sit in the header's right slot — right
           justified, and one bar fewer on a screen where nothing scrolls. */}
