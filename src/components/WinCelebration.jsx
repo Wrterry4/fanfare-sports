@@ -145,13 +145,17 @@ export default function WinCelebration({ outcome, teamName, opponent, teamColor,
     ]).start();
   }, [outcome, opacity, scale]);
 
-  if (!outcome?.final) return null;
-
   // Confetti in the team's color plus the brand gold. A single-color burst
   // reads as a glitch; two colors and their tints read as celebration.
-  const palette = won
+  //
+  // Memoized because Confetti lays its pieces out from this array: a fresh
+  // array each render would reshuffle every piece mid-fall. Declared above the
+  // early return — every hook in this component has to run on every render.
+  const palette = useMemo(() => (won
     ? [teamColor?.fill || colors.primary, '#F5B700', '#FFFFFF', teamColor?.fill || colors.primary]
-    : [];
+    : []), [won, teamColor?.fill]);
+
+  if (!outcome?.final) return null;
 
   const cardBg = won ? (teamColor?.fill || colors.primary) : colors.card;
   const cardFg = won ? (teamColor?.onFill || '#FFFFFF') : colors.navy;

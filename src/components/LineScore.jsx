@@ -33,6 +33,11 @@ function LineScore({ grid, awayName, homeName, muted, onToggleMute, modeLabel, o
         ))}
       </View>
 
+      {/* Innings scroll. Totals do NOT.
+          R, H and E are the numbers anyone actually looks up, and in a long
+          game they were the first thing pushed off the right edge — you had to
+          scroll to find the score, which is the one thing a scoreboard exists
+          to show. They're pinned in their own column outside the scroller. */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.scroll}
                   style={styles.gridScroll}>
@@ -42,9 +47,6 @@ function LineScore({ grid, awayName, homeName, muted, onToggleMute, modeLabel, o
               <Text key={i} style={[styles.cell, styles.headCell,
                      grid.activeColumn === i && styles.headCurrent]}>{h}</Text>
             ))}
-            {grid.totalColumns.map((t) => (
-              <Text key={t} style={[styles.cell, styles.headCell, styles.total]}>{t}</Text>
-            ))}
           </View>
 
           {grid.rows.map((row) => (
@@ -52,13 +54,25 @@ function LineScore({ grid, awayName, homeName, muted, onToggleMute, modeLabel, o
               {row.cells.map((c, i) => (
                 <Text key={i} style={styles.cell}>{c}</Text>
               ))}
-              {row.totals.map((t, i) => (
-                <TickingNumber key={i} style={[styles.cell, styles.total]} value={t} />
-              ))}
             </View>
           ))}
         </View>
       </ScrollView>
+
+      <View style={styles.totals}>
+        <View style={styles.row}>
+          {grid.totalColumns.map((t) => (
+            <Text key={t} style={[styles.cell, styles.headCell, styles.total, styles.totalHead]}>{t}</Text>
+          ))}
+        </View>
+        {grid.rows.map((row) => (
+          <View key={row.side} style={styles.row}>
+            {row.totals.map((t, i) => (
+              <TickingNumber key={i} style={[styles.cell, styles.total, styles.totalValue]} value={t} />
+            ))}
+          </View>
+        ))}
+      </View>
 
       {/* Sound and scoring mode. Settings, glanced at rarely — they ride along
           on this strip instead of occupying a bar of their own. */}
@@ -92,7 +106,13 @@ const styles = StyleSheet.create({
   gridScroll: { flex: 1 },
   // flexGrow pushes a short grid to the right edge rather than leaving it
   // stranded in the middle.
-  scroll: { paddingRight: 12, flexGrow: 1, justifyContent: 'flex-end' },
+  scroll: { paddingRight: 8, flexGrow: 1, justifyContent: 'flex-end' },
+  // Pinned outside the scroller, with a rule separating it from the innings
+  // so the boundary reads as deliberate rather than as a gap.
+  totals: {
+    paddingLeft: 8, paddingRight: 12,
+    borderLeftWidth: 1, borderLeftColor: '#243049',
+  },
   row: { flexDirection: 'row', alignItems: 'center' },
   team: {
     maxWidth: 120, ...text.teamName, fontSize: 10, color: '#8A93AB',
@@ -108,6 +128,11 @@ const styles = StyleSheet.create({
   headCell: { color: '#5F6980', fontSize: 9.5, fontWeight: '800', height: 18, lineHeight: 18 },
   headCurrent: { color: colors.gold },
   total: { color: '#FFF', fontWeight: '900' },
+  // The pinned column is the only place the score appears, and at 12px
+  // Archivo Black is indistinguishable from any bold system face. Bigger, but
+  // still inside the 20px row box so it stays aligned with the name column.
+  totalValue: { fontSize: 16, width: 26 },
+  totalHead: { width: 26 },
   controls: { paddingLeft: 8, paddingRight: 10, alignItems: 'flex-end', gap: 4 },
   control: { ...text.label, fontSize: 8, color: colors.gold },
   controlOff: { color: '#5F6980' },

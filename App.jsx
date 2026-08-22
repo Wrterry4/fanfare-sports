@@ -16,6 +16,7 @@ import { AuthProvider, useAuth } from './src/hooks/AuthProvider.jsx';
 import { ActiveTeamProvider } from './src/hooks/ActiveTeam.jsx';
 import { InAppNoticeProvider } from './src/components/InAppNotice.jsx';
 import PostInstallNotifyPrompt from './src/components/PostInstallNotifyPrompt.jsx';
+import NoticeHost from './src/components/NoticeHost.jsx';
 import { navigationRef } from './src/navigation/navigationRef.js';
 import { linkingConfig } from './src/navigation/linking.js';
 import { connectEmulators } from './src/services/firebase';
@@ -51,6 +52,9 @@ export default function App() {
               <RootNavigator />
             </InAppNoticeProvider>
             <PostInstallNotifyGate />
+            {/* Floats above every screen so notify() can reach it from
+                anywhere, including async handlers. */}
+            <NoticeHost />
           </ActiveTeamProvider>
         </AuthProvider>
       </NavigationContainer>

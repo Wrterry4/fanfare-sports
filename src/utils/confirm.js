@@ -11,6 +11,8 @@
 
 import { Alert, Platform } from 'react-native';
 
+import { getNoticeHandler } from '../components/NoticeHost.jsx';
+
 /**
  * @returns Promise<boolean> — true if the person confirmed.
  */
@@ -34,8 +36,21 @@ export function confirm({ title, message, confirmLabel = 'OK', destructive = fal
   });
 }
 
-/** Plain notice. Alert.alert is fine for this on both platforms. */
+/**
+ * Plain notice.
+ *
+ * Routed through NoticeHost when it's mounted, so a confirmation looks like
+ * the app instead of like the browser — window.alert can't be centered, sized,
+ * or themed, and on a phone it prints the origin above the message.
+ *
+ * The fallback is not dead code: notify() can fire before the host mounts, or
+ * from a screen rendered outside it, and a dropped message is worse than an
+ * ugly one.
+ */
 export function notify(title, message) {
+  const host = getNoticeHandler();
+  if (host) { host(title, message); return; }
+
   if (Platform.OS === 'web') {
     if (typeof window !== 'undefined') window.alert(message ? `${title}\n\n${message}` : title);
     return;

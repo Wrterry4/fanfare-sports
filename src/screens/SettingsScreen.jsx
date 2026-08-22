@@ -19,6 +19,7 @@ import { useAuth } from '../hooks/AuthProvider.jsx';
 import {
   subscribeMembers, buildJoinUrl, ROLE_LABELS,
   subscribePendingClaims, resolvePlayerClaim,
+  linkPlayerToMember, unlinkPlayerFromMember,
 } from '../services/membership.js';
 import { useMyRole } from '../hooks/useMyRole.js';
 import NotificationSettings from '../components/NotificationSettings.jsx';
@@ -71,6 +72,8 @@ export default function SettingsScreen() {
   const [menu, setMenu] = useState(false);
   const [claims, setClaims] = useState([]);
   const [copied, setCopied] = useState(false);
+  /** Which member's player-link list is expanded, if any. */
+  const [linkingUid, setLinkingUid] = useState(null);
   const { isStaff, isFan, member } = useMyRole();
 
   /**
@@ -137,11 +140,18 @@ export default function SettingsScreen() {
     } catch (e) { notify('Could not save the color', e.message); }
   }, [team?.id]);
 
+  const toggleLink = useCallback(async (memberUid, playerId, isLinked) => {
+    try {
+      if (isLinked) await unlinkPlayerFromMember(team.id, memberUid, playerId);
+      else await linkPlayerToMember(team.id, memberUid, playerId);
+    } catch (e) { notify('Could not change the link', e.message); }
+  }, [team?.id]);
+
   const save = useCallback(async () => {
     setSaving(true);
     try {
       await updateDoc(doc(db, 'teams', team.id), { rules });
-      notify('Saved', 'Applies to games created from now on. Games already played keep their own rules.');
+      notify('Saved', 'Applies to new games only. Current games retain the previous settings.');
     } catch (e) { notify('Could not save', e.message); }
     setSaving(false);
   }, [team?.id, rules]);
@@ -244,18 +254,61 @@ export default function SettingsScreen() {
           )}
 
           {pane === 'people' && (
-          <Section title={`On this team · ${visibleMembers.length}`}>
-            {visibleMembers.map((m) => (
-              <View key={m.uid} style={styles.memberRow}>
-                <View style={styles.flex}>
-                  <Text style={styles.memberName}>
-                    {m.displayName || (m.uid === user?.uid ? 'You' : 'Team member')}
-                  </Text>
-                  <Text style={styles.memberRole}>{ROLE_LABELS[m.role] || m.role}</Text>
+          <Section title="On this team"
+                   sub={isStaff ? 'Tap someone to link them to a player.' : undefined}>
+            {visibleMembers.map((m) => {
+              const linked = (roster || []).filter(
+                (p) => (m.linkedPlayerIds || []).includes(p.playerId));
+              const open = linkingUid === m.uid;
+              return (
+                <View key={m.uid}>
+                  <Pressable
+                    style={styles.memberRow}
+                    disabled={!isStaff}
+                    onPress={() => setLinkingUid(open ? null : m.uid)}
+                    accessibilityRole={isStaff ? 'button' : undefined}
+                  >
+                    <View style={styles.flex}>
+                      <Text style={styles.memberName}>
+                        {m.displayName || (m.uid === user?.uid ? 'You' : 'Team member')}
+                      </Text>
+                      <Text style={styles.memberRole}>
+                        {ROLE_LABELS[m.role] || m.role}
+                        {linked.length ? ` · ${linked.map((p) => p.firstName || 'Player').join(', ')}` : ''}
+                      </Text>
+                    </View>
+                    {m.uid === user?.uid && <Text style={styles.youTag}>YOU</Text>}
+                    {isStaff && <Text style={styles.chevron}>{open ? '⌄' : '›'}</Text>}
+                  </Pressable>
+
+                  {/* Guardianship is never self-granted — see membership.js.
+                      This is the coach's side of that: the roster, with the
+                      ones already linked marked, tap to toggle. */}
+                  {isStaff && open && (
+                    <View style={styles.linkBox}>
+                      {(roster || []).length === 0 ? (
+                        <Text style={styles.hint}>No players on the roster yet.</Text>
+                      ) : (roster || []).map((p) => {
+                        const on = (m.linkedPlayerIds || []).includes(p.playerId);
+                        return (
+                          <Pressable
+                            key={p.playerId}
+                            onPress={() => toggleLink(m.uid, p.playerId, on)}
+                            style={[styles.linkChip, on && styles.linkChipOn]}
+                          >
+                            <Text style={[styles.linkChipText, on && styles.linkChipTextOn]}>
+                              {on ? '✓ ' : ''}
+                              {[p.firstName, p.lastName].filter(Boolean).join(' ') || 'Player'}
+                              {p.jerseyNumber != null ? ` #${p.jerseyNumber}` : ''}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  )}
                 </View>
-                {m.uid === user?.uid && <Text style={styles.youTag}>YOU</Text>}
-              </View>
-            ))}
+              );
+            })}
           </Section>
           )}
 
@@ -488,6 +541,17 @@ const styles = StyleSheet.create({
   cta: { height: 50, borderRadius: radius.md, backgroundColor: colors.navy, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm },
   ctaGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.line },
   ctaText: { ...text.buttonSecondary, color: '#FFF', letterSpacing: 0.8 },
+  linkBox: {
+    flexDirection: 'row', flexWrap: 'wrap', gap: 6,
+    paddingBottom: spacing.sm, paddingLeft: 2,
+  },
+  linkChip: {
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.sm,
+    borderWidth: 1, borderColor: colors.line, backgroundColor: colors.chalk,
+  },
+  linkChipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  linkChipText: { ...text.body, fontSize: 12, color: colors.navy },
+  linkChipTextOn: { color: '#FFFFFF' },
   menuRow: {
     flexDirection: 'row', alignItems: 'center', gap: spacing.sm,
     backgroundColor: colors.card, borderRadius: radius.lg,

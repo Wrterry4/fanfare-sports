@@ -130,7 +130,11 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
   const { user } = useAuth();
   const { height } = useWindowDimensions();
 
-  const [mode, setMode] = useState(SCORING_MODES.FULL);
+  // Outcomes-only by default for every sport. Full pitch-by-pitch is a real
+  // commitment — hundreds of extra taps a game — and a coach who wants it can
+  // switch in one tap, while someone handed FULL by default just finds the
+  // app exhausting and never discovers there was a lighter mode.
+  const [mode, setMode] = useState(SCORING_MODES.CASUAL);
   const [runnerSheet, setRunnerSheet] = useState(null);
   // Which participant slot is being substituted, by key. Sport-neutral.
   const [subSheet, setSubSheet] = useState(null);
@@ -251,14 +255,22 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
    */
   const [celebration, setCelebration] = useState(null);
   const wasFinalRef = useRef(null);
+  const celebratedRef = useRef(false);
   useEffect(() => {
     if (!state) return;
     const isFinal = state.status === 'final';
     const first = wasFinalRef.current === null;
     wasFinalRef.current = isFinal;
-    if (first || !isFinal) return;
+
+    // A finished game keeps receiving state updates — a late summary sync, a
+    // re-render from any other subscription — and this effect runs on each
+    // one. Firing again would build a NEW outcome object every time, which
+    // replays the entrance animation and reopens a card the person already
+    // dismissed. Once per game is the whole contract.
+    if (first || !isFinal || celebratedRef.current) return;
+    celebratedRef.current = true;
     setCelebration(describeOutcome(state, game?.homeOrAway));
-  }, [state?.status, state, game?.homeOrAway]);
+  }, [state, game?.homeOrAway]);
 
   if (!state) return <Centered><ActivityIndicator color={colors.primary} /></Centered>;
 

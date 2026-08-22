@@ -77,7 +77,7 @@ function Tabs() {
   const bottomInset = useBottomInset();
   // 4px keeps the labels off a hard screen edge on a device with no inset.
   const bottomPad = bottomInset > 0 ? bottomInset : 4;
-  const barHeight = 52 + bottomPad;
+  const barHeight = 62 + bottomPad;
 
   return (
     <Tab.Navigator
@@ -101,12 +101,17 @@ function Tabs() {
           elevation: 0,
           shadowOpacity: 0,
         },
-        tabBarItemStyle: { paddingVertical: 0, height: 52, justifyContent: 'center' },
+        // 62, not 52. The label sat in a 13px line box inside a 52px item and
+        // the descenders in "Schedule" and "Game Day" were clipped off the
+        // bottom — a g and a y are the whole difference between a label that
+        // reads and one that looks broken. Icon 4 + 22, label 15, and room
+        // underneath so nothing lands on the item's edge.
+        tabBarItemStyle: { paddingVertical: 0, height: 62, justifyContent: 'center' },
         tabBarLabelStyle: {
           fontFamily: 'PublicSans', fontWeight: '700', fontSize: 10,
-          lineHeight: 13, marginTop: 0, marginBottom: 2, includeFontPadding: false,
+          lineHeight: 15, marginTop: 1, marginBottom: 6, includeFontPadding: false,
         },
-        tabBarIconStyle: { marginTop: 4, marginBottom: 0 },
+        tabBarIconStyle: { marginTop: 5, marginBottom: 0 },
       }}
     >
       {TABS.filter(([name]) => !isFan
