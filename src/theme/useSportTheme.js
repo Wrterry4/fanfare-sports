@@ -53,7 +53,28 @@ export function useSportTheme() {
 /** Just the team's colors, for the many callers that need nothing else. */
 export function useTeamColor() {
   const { team } = useActiveTeam();
-  return useMemo(() => resolveTeamColor(team), [team?.colorId, team?.color]);
+  return useMemo(
+    () => resolveTeamColor(team),
+    [team?.colorId, team?.color, team?.secondaryColorId],
+  );
+}
+
+/**
+ * The page background for the active team.
+ *
+ * A tint of the team color into the brand's chalk, never the color itself —
+ * see shared/teamColors.js for why, and teamColors.test.js for the proof that
+ * every preset leaves body and secondary text above AA on it.
+ *
+ * Screens apply this over their own `root` style rather than replacing it, so
+ * a screen rendered before a team resolves still has a background.
+ */
+export function useTeamSurface() {
+  const { team } = useActiveTeam();
+  return useMemo(
+    () => resolveTeamColor(team).surface,
+    [team?.colorId, team?.color],
+  );
 }
 
 /** For components handed a pack directly rather than reading context. */

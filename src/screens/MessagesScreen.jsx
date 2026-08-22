@@ -24,10 +24,12 @@ import {
 import AppHeader, { SegmentedTabs } from '../components/AppHeader.jsx';
 import AccountSheet from '../components/AccountSheet.jsx';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
+import { useTeamSurface } from '../theme/useSportTheme.js';
 import { multilineStyle } from '../theme/inputs.js';
 
 export default function MessagesScreen() {
   const { team, loading } = useGameDay();
+  const surface = useTeamSurface();
   const { user } = useAuth();
   const [tab, setTab] = useState('team');
   const [members, setMembers] = useState([]);
@@ -43,7 +45,7 @@ export default function MessagesScreen() {
   if (!team) return <Centered><Text style={styles.msg}>No team yet.</Text></Centered>;
 
   return (
-    <SafeAreaView style={styles.root} edges={['top']}>
+    <SafeAreaView style={[styles.root, { backgroundColor: surface }]} edges={['top']}>
       {openDm ? (
         // In a thread the other person's name is centred on the back row,
         // which is where a messaging app puts it.

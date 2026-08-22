@@ -10,10 +10,11 @@
  */
 
 import {
-  parseHex, luminance, contrastRatio, onColor, meetsAA, MIN_AA,
+  parseHex, luminance, contrastRatio, onColor, meetsAA, mix, MIN_AA,
 } from '../src/shared/contrast.js';
 import {
   TEAM_COLORS, DEFAULT_TEAM_COLOR, resolveTeamColor, isTeamColorId,
+  teamSurface, SURFACE_TINT,
 } from '../src/shared/teamColors.js';
 
 let passed = 0, failed = 0;
@@ -105,6 +106,101 @@ group('resolveTeamColor tolerates every document it will actually meet');
 
   ok('a legacy `color` field still works',
     resolveTeamColor({ color: 'forest' }).fill === '#166534');
+}
+
+group('mix blends predictably');
+{
+  ok('t=0 is the first color', mix('#000000', '#FFFFFF', 0) === '#000000');
+  ok('t=1 is the second color', mix('#000000', '#FFFFFF', 1) === '#FFFFFF');
+  ok('halfway is halfway', mix('#000000', '#FFFFFF', 0.5) === '#808080');
+  ok('t below 0 clamps', mix('#000000', '#FFFFFF', -5) === '#000000');
+  ok('t above 1 clamps', mix('#000000', '#FFFFFF', 5) === '#FFFFFF');
+  ok('junk t is treated as 0', mix('#123456', '#FFFFFF', 'abc') === '#123456');
+  ok('an unparseable input falls back rather than throwing',
+    !!mix('nonsense', '#FFFFFF', 0.5));
+}
+
+/**
+ * The tinted page background is the one change that could quietly make the
+ * whole app unreadable — it sits behind every screen, and a background is the
+ * last thing anyone thinks to test. These are the real pairs from brand.js
+ * that now land on it.
+ */
+group('No team color can wash out the page');
+{
+  const NAVY = '#0F172A';      // body text
+  const SLATE = '#475569';     // secondary text (colors.pencil)
+  const CARD = '#FFFFFF';      // cards sit on top of the surface
+  const LINE = '#E2E8F0';      // hairline borders
+
+  let worstBody = Infinity;
+  let worstSecondary = Infinity;
+
+  for (const c of TEAM_COLORS) {
+    const surface = teamSurface({ colorId: c.id });
+    const body = contrastRatio(NAVY, surface);
+    const secondary = contrastRatio(SLATE, surface);
+    worstBody = Math.min(worstBody, body);
+    worstSecondary = Math.min(worstSecondary, secondary);
+
+    ok(`${c.label}: body text ${body.toFixed(1)}:1, secondary ${secondary.toFixed(1)}:1`,
+      body >= 7 && secondary >= MIN_AA);
+  }
+
+  console.log(`       worst body ${worstBody.toFixed(2)}:1, worst secondary ${worstSecondary.toFixed(2)}:1`);
+
+  // A white card has to stay visible ON the tint, or the layout loses its
+  // structure — that's the failure mode in the other direction from text.
+  for (const c of TEAM_COLORS) {
+    const surface = teamSurface({ colorId: c.id });
+    ok(`${c.label}: a white card still separates from the surface`,
+      contrastRatio(CARD, surface) >= 1.02);
+  }
+
+  ok('the hairline border still reads against the lightest surface',
+    contrastRatio(LINE, teamSurface({ colorId: 'white' })) >= 1.0);
+  ok('the default (no color chosen) surface is readable',
+    contrastRatio(NAVY, teamSurface({})) >= 7);
+}
+
+group('The surface is a tint, not the team color');
+{
+  // If this ever stops being true, someone has raised SURFACE_TINT far enough
+  // that the app has quietly become a different design per team.
+  ok('the tint is a small fraction, not a wash', SURFACE_TINT <= 0.15);
+
+  for (const c of TEAM_COLORS) {
+    const surface = teamSurface({ colorId: c.id });
+    ok(`${c.label}: the surface stays light`, luminance(surface) > 0.55);
+  }
+
+  // ...but not SO subtle it was pointless. Every tint must be distinguishable
+  // from plain chalk, or the feature does nothing and nobody can tell.
+  const chalk = '#F8FAFC';
+  const distinct = TEAM_COLORS.filter((c) => teamSurface({ colorId: c.id }) !== chalk);
+  ok('every color actually changes the surface', distinct.length === TEAM_COLORS.length);
+}
+
+group('Primary and secondary');
+{
+  const both = resolveTeamColor({ colorId: 'navy', secondaryColorId: 'gold' });
+  ok('primary resolves', both.fill === '#1E3A8A');
+  ok('secondary resolves', both.secondary.fill === '#F59E0B');
+  ok('secondary keeps its own text color', both.secondary.onFill === '#0F172A');
+  ok('the surface is tinted from the PRIMARY, not the secondary',
+    both.surface === teamSurface({ colorId: 'navy' }));
+
+  const onlyPrimary = resolveTeamColor({ colorId: 'crimson' });
+  ok('no secondary falls back to primary rather than null',
+    onlyPrimary.secondary.fill === '#B91C1C');
+
+  const neither = resolveTeamColor({});
+  ok('no colors at all still gives a usable secondary',
+    neither.secondary.fill === DEFAULT_TEAM_COLOR.fill);
+
+  ok('an unknown secondary id falls back to primary',
+    resolveTeamColor({ colorId: 'navy', secondaryColorId: 'chartreuse' }).secondary.fill
+      === '#1E3A8A');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

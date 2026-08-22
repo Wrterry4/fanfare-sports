@@ -52,6 +52,25 @@ export function contrastRatio(a, b) {
   return (light + 0.05) / (dark + 0.05);
 }
 
+/**
+ * Blend two colors. t=0 is all `a`, t=1 is all `b`.
+ *
+ * Mixing in sRGB rather than a perceptual space is deliberate: at the small
+ * ratios this is used for — a few percent of team color into a near-white
+ * background — the two are indistinguishable, and sRGB keeps the function
+ * dependency-free and trivially testable.
+ */
+export function mix(a, b, t) {
+  const ca = parseHex(a);
+  const cb = parseHex(b);
+  if (!ca || !cb) return ca ? a : b;
+  const k = Math.min(1, Math.max(0, Number(t) || 0));
+  const hex = (n) => n.toString(16).padStart(2, '0');
+  return `#${hex(Math.round(ca.r + (cb.r - ca.r) * k))
+    }${hex(Math.round(ca.g + (cb.g - ca.g) * k))
+    }${hex(Math.round(ca.b + (cb.b - ca.b) * k))}`.toUpperCase();
+}
+
 /** AA for body text. 3:1 is the large-text bar — don't use it for labels. */
 export const MIN_AA = 4.5;
 export const MIN_AA_LARGE = 3;

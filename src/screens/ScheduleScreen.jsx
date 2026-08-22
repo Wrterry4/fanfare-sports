@@ -34,6 +34,7 @@ import AppHeader, { HeaderButton } from '../components/AppHeader.jsx';
 import FinalLineScore from '../components/FinalLineScore.jsx';
 import AccountSheet from '../components/AccountSheet.jsx';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
+import { useTeamSurface } from '../theme/useSportTheme.js';
 import { inputStyle, multilineStyle } from '../theme/inputs.js';
 
 const emptyForm = () => ({
@@ -45,6 +46,7 @@ const emptyForm = () => ({
 
 export default function ScheduleScreen() {
   const { team, rules, roster, loading } = useGameDay();
+  const surface = useTeamSurface();
   const [games, setGames] = useState([]);
   const [adding, setAdding] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
@@ -93,7 +95,7 @@ export default function ScheduleScreen() {
   if (!team) return <Centered><Text style={styles.msg}>No team yet.</Text></Centered>;
 
   return (
-    <SafeAreaView style={styles.root} edges={['top']}>
+    <SafeAreaView style={[styles.root, { backgroundColor: surface }]} edges={['top']}>
       <AppHeader
         team={team}
         onMenu={() => setMenu(true)}

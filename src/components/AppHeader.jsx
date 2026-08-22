@@ -81,7 +81,14 @@ function AppHeader({ team, onMenu, right, onBack, centerTitle }) {
         visible at a glance from the stands, and can't make anything
         unreadable because nothing sits on it.
       */}
-      <View style={[styles.stripe, { backgroundColor: teamColor.fill }]} />
+      <View style={styles.stripeRow}>
+        <View style={[styles.stripe, { backgroundColor: teamColor.fill }]} />
+        {/* The second colour only appears when it differs — a team that picked
+            one colour gets a clean single band rather than a seam. */}
+        {teamColor.secondary?.fill !== teamColor.fill && (
+          <View style={[styles.stripeSecondary, { backgroundColor: teamColor.secondary.fill }]} />
+        )}
+      </View>
 
     </View>
   );
@@ -116,7 +123,9 @@ export function HeaderButton({ label, onPress, active }) {
 
 const styles = StyleSheet.create({
   wrap: { backgroundColor: colors.navy },
+  stripeRow: { width: '100%' },
   stripe: { height: 3, width: '100%' },
+  stripeSecondary: { height: 2, width: '100%' },
   bar: {
     height: HEADER_HEIGHT,
     flexDirection: 'row', alignItems: 'center',

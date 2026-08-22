@@ -32,6 +32,7 @@ import { ensureStatsAccess } from '../services/statsService.js';
 import { BUILD_INFO } from '../generated/buildInfo.js';
 import { formatBuildLabel } from '../shared/buildLabel.js';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
+import { useTeamSurface } from '../theme/useSportTheme.js';
 import { inputStyle } from '../theme/inputs.js';
 
 /**
@@ -62,6 +63,7 @@ export default function SettingsScreen() {
    * menu that never goes more than one level deep.
    */
   const [pane, setPane] = useState('menu');
+  const surface = useTeamSurface();
   const { user } = useAuth();
   // Not a hook — BUILD_INFO is fixed for the lifetime of this bundle, so
   // there's nothing to recompute on re-render.
@@ -134,9 +136,9 @@ export default function SettingsScreen() {
    * action, and making someone scroll to confirm a color is how you end up
    * with teams whose color silently didn't stick.
    */
-  const saveColor = useCallback(async (colorId) => {
+  const saveColor = useCallback(async (field, colorId) => {
     try {
-      await updateDoc(doc(db, 'teams', team.id), { colorId: colorId || null });
+      await updateDoc(doc(db, 'teams', team.id), { [field]: colorId || null });
     } catch (e) { notify('Could not save the color', e.message); }
   }, [team?.id]);
 
@@ -175,7 +177,7 @@ export default function SettingsScreen() {
   const paneTitle = PANES.find(([k]) => k === pane)?.[1];
 
   return (
-    <SafeAreaView style={styles.root} edges={['top']}>
+    <SafeAreaView style={[styles.root, { backgroundColor: surface }]} edges={['top']}>
       <AppHeader
         team={team}
         onMenu={() => setMenu(true)}
@@ -354,12 +356,18 @@ export default function SettingsScreen() {
           {/* Rules of play are the coach's. Everyone else gets Settings for
               their own notification preferences and nothing more. */}
           {pane === 'team' && isStaff && (
-          <Section title="Team color"
-                   sub="Their jersey color. Shows on the scoreboard and celebrations.">
+          <Section title="Team colors"
+                   sub="Their jersey colors. The primary tints every screen and carries celebrations; the second is trim.">
             <TeamColorPicker
               value={team.colorId ?? null}
-              onChange={saveColor}
-              label={null}
+              onChange={(id) => saveColor('colorId', id)}
+              label="PRIMARY"
+            />
+            <View style={styles.pickerGap} />
+            <TeamColorPicker
+              value={team.secondaryColorId ?? null}
+              onChange={(id) => saveColor('secondaryColorId', id)}
+              label="SECONDARY"
             />
           </Section>
           )}
@@ -541,6 +549,7 @@ const styles = StyleSheet.create({
   cta: { height: 50, borderRadius: radius.md, backgroundColor: colors.navy, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm },
   ctaGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.line },
   ctaText: { ...text.buttonSecondary, color: '#FFF', letterSpacing: 0.8 },
+  pickerGap: { height: spacing.lg },
   linkBox: {
     flexDirection: 'row', flexWrap: 'wrap', gap: 6,
     paddingBottom: spacing.sm, paddingLeft: 2,

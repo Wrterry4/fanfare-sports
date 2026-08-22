@@ -34,11 +34,13 @@ import PlayerCardScreen from './PlayerCardScreen.jsx';
 import { sportForTeam } from '../sports/registry.js';
 import { requestPlayerClaim, subscribeMyClaims } from '../services/membership.js';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
+import { useTeamSurface } from '../theme/useSportTheme.js';
 import { inputStyle } from '../theme/inputs.js';
 
 
 export default function RosterScreen() {
   const { team, game, allGames, roster, loading } = useGameDay();
+  const surface = useTeamSurface();
   const { isStaff, isFan } = useMyRole();
   const [tab, setTab] = useState('roster');
   const [adding, setAdding] = useState(false);
@@ -48,7 +50,7 @@ export default function RosterScreen() {
   if (!team) return <Centered><Text style={styles.msg}>No team yet.</Text></Centered>;
 
   return (
-    <SafeAreaView style={styles.root} edges={['top']}>
+    <SafeAreaView style={[styles.root, { backgroundColor: surface }]} edges={['top']}>
       <AppHeader
         team={team}
         onMenu={() => setMenu(true)}

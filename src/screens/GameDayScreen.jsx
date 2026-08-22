@@ -70,6 +70,9 @@ export default function GameDayScreen() {
   }, [pinnedId, allGames, game]);
 
   const [menu, setMenu] = useState(false);
+  // The team tint reaches the loading and empty states too, so the background
+  // doesn't change colour the instant a game finishes loading.
+  const surface = resolveTeamColor(team).surface;
   const header = (
     <>
       <AppHeader team={team} onMenu={() => setMenu(true)} />
@@ -84,17 +87,17 @@ export default function GameDayScreen() {
   );
 
   if (loading) {
-    return <Shell header={header}><Centered><ActivityIndicator color={colors.primary} /></Centered></Shell>;
+    return <Shell header={header} surface={surface}><Centered><ActivityIndicator color={colors.primary} /></Centered></Shell>;
   }
   if (error) {
-    return <Shell header={header}><Centered><Text style={styles.msg}>{error.message}</Text></Centered></Shell>;
+    return <Shell header={header} surface={surface}><Centered><Text style={styles.msg}>{error.message}</Text></Centered></Shell>;
   }
   if (!team) {
-    return <Shell header={header}><Centered><Text style={styles.msg}>No team yet.</Text></Centered></Shell>;
+    return <Shell header={header} surface={surface}><Centered><Text style={styles.msg}>No team yet.</Text></Centered></Shell>;
   }
   if (!shown || !config) {
     return (
-      <Shell header={header}>
+      <Shell header={header} surface={surface}>
         <Centered>
           <Text style={styles.emptyTitle}>No game scheduled</Text>
           <Text style={styles.msg}>Add one from the Schedule tab and start it there.</Text>
@@ -121,6 +124,9 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
   // `sport` above, not a second team lookup — this screen's own team prop is
   // already the correct source.
   const sportTheme = sportThemeOf(sport);
+  // Resolved once and passed down. Three components on this screen need it,
+  // and re-resolving per use rebuilt an object each render.
+  const teamColors = resolveTeamColor(team);
   const {
     Field, ActionPads, RunnerSheet, SCORING_MODES,
     describePeriod, describeCounters, describePeriodScores,
@@ -360,17 +366,17 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
   const showField = sport.HAS_FIELD_VISUAL !== false;
 
   return (
-    <SafeAreaView style={styles.root} edges={['top']}>
+    <SafeAreaView style={[styles.root, { backgroundColor: teamColors.surface }]} edges={['top']}>
       {/* Absolutely positioned and non-interactive — see MomentBanner.jsx.
           Placed first so it overlays everything below regardless of where
           in the tree it sits. */}
-      <MomentBanner moment={moment} teamColor={resolveTeamColor(team)} />
+      <MomentBanner moment={moment} teamColor={teamColors} />
 
       <WinCelebration
         outcome={celebration}
         teamName={team?.name}
         opponent={game?.opponent}
-        teamColor={resolveTeamColor(team)}
+        teamColor={teamColors}
         onDismiss={() => setCelebration(null)}
       />
 
@@ -932,8 +938,8 @@ const ordinal = (n) => {
 };
 
 /** Keeps the header on screen for the loading and empty states too. */
-const Shell = ({ header, children }) => (
-  <SafeAreaView style={styles.root} edges={['top']}>
+const Shell = ({ header, children, surface }) => (
+  <SafeAreaView style={[styles.root, surface && { backgroundColor: surface }]} edges={['top']}>
     {header}
     {children}
   </SafeAreaView>
