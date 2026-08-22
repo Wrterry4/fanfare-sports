@@ -33,6 +33,13 @@ const HEAD = `
     <meta name="theme-color" content="#0F172A">
     <meta name="description" content="Live scoring, stats, and team communication for youth sports.">
 
+    <!-- Archivo and Public Sans, self-hosted. Every fontFamily in the app
+         names one of these two; without this stylesheet all of them fall
+         back to the system font and the scoreboard renders in Segoe UI.
+         See public/fonts.css for why this isn't expo-font. -->
+    <link rel="preload" href="/fonts/Archivo.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/fonts.css">
+
     <!-- iOS standalone. Without apple-mobile-web-app-capable, a home-screen
          icon opens in Safari chrome instead of as an app. -->
     <meta name="apple-mobile-web-app-capable" content="yes">

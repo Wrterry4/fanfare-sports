@@ -1,0 +1,57 @@
+/*
+ * fonts.css — The typefaces the whole app assumes exist.
+ *
+ * ── Why @font-face and not expo-font ────────────────────────────────────────
+ *
+ * expo-font's useFonts() maps ONE file to one family name. Every style in this
+ * app says `fontFamily: 'Archivo'` together with a fontWeight — 700 for team
+ * names, 800 for headings, 900 for scoreboard numerals — which
+ * react-native-web emits as `font-family: Archivo; font-weight: 900`. That
+ * needs one family carrying several weights, which is what @font-face does and
+ * what useFonts cannot express. Registering them as Archivo-Black and friends
+ * would have meant rewriting all 84 fontFamily declarations to name a weight.
+ *
+ * ── Why one file per family, not one per weight ─────────────────────────────
+ *
+ * Google serves both of these as VARIABLE fonts now: asking for 700, 800 and
+ * 900 returns the same file three times — verified by checksum, and by both
+ * the css2 and the older css API returning identical URLs. The three URLs each
+ * family does have are character subsets (latin, latin-ext, vietnamese), not
+ * weights. So each family is declared once across its whole axis and the
+ * browser instances the weight it's asked for. Shipping the same 35 KB three
+ * times under three names would have been pure waste, and static-looking
+ * filenames would have been a lie about what's in them.
+ *
+ * ── Why self-hosted ─────────────────────────────────────────────────────────
+ *
+ * This is a PWA people open at a field with one bar of signal, and an
+ * installed app whose type disappears offline is worse than one that never had
+ * it. Served from our own origin the service worker caches them like anything
+ * else, and no third party learns who is reading a kid's box score.
+ *
+ * font-display: swap, so a slow connection shows system text that upgrades in
+ * place rather than leaving the scoreboard blank while the font arrives.
+ *
+ * Both families are SIL Open Font License 1.1. Latin subset only — 61.7 KB for
+ * the pair.
+ */
+
+/* Scoreboard numerals, headings, banners. Used at 700, 800, and 900. */
+@font-face {
+  font-family: 'Archivo';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/Archivo.woff2') format('woff2-variations'),
+       url('/fonts/Archivo.woff2') format('woff2');
+}
+
+/* Interface text. Used at 400, 600, and 700. */
+@font-face {
+  font-family: 'PublicSans';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/PublicSans.woff2') format('woff2-variations'),
+       url('/fonts/PublicSans.woff2') format('woff2');
+}
