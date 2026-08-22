@@ -43,9 +43,10 @@ const C = {
 /** Everything in the 192-unit design space, matching FanfareLogo.jsx. */
 const TILE = { x: 0, y: 0, w: 192, h: 192, r: 52 };
 const GLYPH = [
-  { x: 46, y: 32, w: 32, h: 128, r: 16, c: C.white },
-  { x: 46, y: 32, w: 100, h: 28, r: 14, c: C.gold },
-  { x: 46, y: 82, w: 78, h: 28, r: 14, c: C.sky },
+  { x: 38, y: 32, w: 30, h: 128, r: 15, c: C.white },
+  { x: 80, y: 32, w: 74, h: 24, r: 12, c: C.gold },
+  { x: 80, y: 64, w: 44, h: 24, r: 12, c: C.sky },
+  { x: 80, y: 96, w: 74, h: 24, r: 12, c: C.gold },
 ];
 
 /** Signed-distance test for a rounded rectangle. Negative is inside. */

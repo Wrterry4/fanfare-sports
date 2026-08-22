@@ -7,13 +7,16 @@
  *
  * ── The mark ────────────────────────────────────────────────────────────────
  *
- * A rounded square in royal blue holding an F built from pills: a white stem,
- * a long gold top arm, a shorter sky-blue middle arm.
+ * A rounded square in royal blue holding an F that doubles as a level meter:
+ * a white stem, and three bars standing clear of it — long gold, short sky,
+ * long gold.
  *
- * It was three evenly stacked bars first, and that version read as a list or
- * a hamburger menu rather than a letter — the giveaway that a mark has stopped
- * being a monogram is when you have to be told what it stands for. Dropping
- * the bottom bar and starting the arms at the stem is the whole difference.
+ * Two earlier versions are worth remembering. Three evenly stacked bars of
+ * equal length read as a hamburger menu, not a letter; the tell that a mark
+ * has stopped being a monogram is needing to be told what it stands for. Then
+ * arms welded onto the stem read as an F but said nothing about audio. Holding
+ * the bars off the stem is what lets it be both: the eye closes the gap and
+ * still sees an F, while the detached bars read as signal.
  *
  * Everything is expressed against a 192 viewBox so a single `size` prop scales
  * the whole thing, and every bar is a Rect with rx at half its height, which
@@ -58,14 +61,16 @@ export function FanfareMark({ size = 96, rounded = true }) {
           rather than a rounded rectangle. */}
       {rounded && <Rect x="0" y="0" width="192" height="192" rx="52" fill={`url(#${gid})`} />}
 
-      {/* An F, built from the same pills.
-          Three stacked bars read as a list or a menu — which is what the first
-          version looked like. An F is a stem and TWO arms, the lower one
-          shorter, so the bottom bar is gone and the arms start at the stem
-          rather than beside it. Same three colours, same pill language. */}
-      <Rect x="46" y="32" width="32" height="128" rx="16" fill={BRAND.white} />
-      <Rect x="46" y="32" width="100" height="28" rx="14" fill={BRAND.gold} />
-      <Rect x="46" y="82" width="78" height="28" rx="14" fill={BRAND.sky} />
+      {/* An F that is also a level meter.
+          The bars stand clear of the stem, which is what turns them from
+          serifs into signal — an equalizer beside the letter rather than
+          welded onto it. The two long gold bars are the arms that keep it
+          legible as an F; the short sky bar between them is the one that says
+          audio. The stem runs on below all three, so the F still has a foot. */}
+      <Rect x="38" y="32" width="30" height="128" rx="15" fill={BRAND.white} />
+      <Rect x="80" y="32" width="74" height="24" rx="12" fill={BRAND.gold} />
+      <Rect x="80" y="64" width="44" height="24" rx="12" fill={BRAND.sky} />
+      <Rect x="80" y="96" width="74" height="24" rx="12" fill={BRAND.gold} />
     </Svg>
   );
 }
