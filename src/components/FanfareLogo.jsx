@@ -93,8 +93,11 @@ export function FanfareLockup({ scale = 1, tagline = true }) {
           FANFARE<Text style={styles.sports}> SPORTS</Text>
         </Text>
         {tagline && (
-          <Text style={[styles.tagline, { fontSize: s(10) }]} numberOfLines={1}>
-            TEAM HUB &amp; GAME AUDIO
+          <Text
+            style={[styles.tagline, { fontSize: s(10), letterSpacing: 1.6 * scale }]}
+            numberOfLines={1}
+          >
+            EVERY PLAYER DESERVES A FANFARE
           </Text>
         )}
       </View>
@@ -117,6 +120,9 @@ const styles = StyleSheet.create({
   sports: { color: colors.gold },
   tagline: {
     fontFamily: 'PublicSans', fontWeight: '600',
-    color: '#94A3B8', letterSpacing: 1.6, marginTop: 5, textAlign: 'center',
+    // letterSpacing is applied by the caller, multiplied by scale. A fixed
+    // value stays wide while the type shrinks, which is exactly what crowds a
+    // long tagline on a small phone.
+    color: '#94A3B8', marginTop: 5, textAlign: 'center',
   },
 });
