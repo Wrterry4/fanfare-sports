@@ -15,6 +15,9 @@ export const baseballTheme = {
   fieldFill: '#FFFFFF',
   occupied: '#B5451B',     // a base with a runner on it
 
+  /** Which silhouette this sport's players wear. See components/Jersey.jsx. */
+  jersey: 'baseball',
+
   /**
    * The playing surface itself.
    *

@@ -11,9 +11,10 @@
 
 import React, { memo } from 'react';
 import { View, Pressable, StyleSheet } from 'react-native';
-import Svg, { Path, Rect, Text as SvgText, G } from 'react-native-svg';
+import Svg, { Path, Rect } from 'react-native-svg';
 import { colors } from '../../../theme/tokens.js';
 import { baseballTheme } from '../theme.js';
+import { JerseyGlyph } from '../../../components/Jersey.jsx';
 
 const BASE_XY = { 1: [165, 105], 2: [100, 40], 3: [35, 105] };
 
@@ -21,63 +22,12 @@ const BASE_XY = { 1: [165, 105], 2: [100, 40], 3: [35, 105] };
 const DEFAULT_JERSEY = { fill: colors.clay, onFill: '#FFFFFF', numberOn: '#FFFFFF' };
 
 /**
- * A jersey, drawn around its centre so it can be dropped on any base.
- *
- * Body, then two sleeves, then the collar notch cut back in the shirt color.
- * The proportions are a youth tee rather than a tapered adult jersey — wide
- * shoulders, short body — because at 34px the number has to fit inside it and
- * a realistic silhouette leaves no room.
- */
-function Jersey({ cx, cy, w = 34, fill, stroke, numberColor, number }) {
-  const h = w * 0.95;
-  const x = cx - w / 2;
-  const y = cy - h / 2;
-  const s = w / 34;   // everything below is authored at w=34
-
-  return (
-    <G>
-      {/* Sleeves first so the body's rounded corners sit over them. */}
-      <Path
-        d={`M${x - 4 * s} ${y + 4 * s}
-            L${x + 8 * s} ${y}
-            L${x + 8 * s} ${y + 12 * s}
-            L${x - 4 * s} ${y + 11 * s} Z`}
-        fill={fill} stroke={stroke} strokeWidth={1.5 * s} strokeLinejoin="round"
-      />
-      <Path
-        d={`M${x + w + 4 * s} ${y + 4 * s}
-            L${x + w - 8 * s} ${y}
-            L${x + w - 8 * s} ${y + 12 * s}
-            L${x + w + 4 * s} ${y + 11 * s} Z`}
-        fill={fill} stroke={stroke} strokeWidth={1.5 * s} strokeLinejoin="round"
-      />
-
-      <Rect
-        x={x} y={y} width={w} height={h} rx={5 * s}
-        fill={fill} stroke={stroke} strokeWidth={1.5 * s}
-      />
-
-      {/* Collar — a notch of the field showing through the shoulders. */}
-      <Path
-        d={`M${cx - 6 * s} ${y}
-            Q${cx} ${y + 7 * s} ${cx + 6 * s} ${y}Z`}
-        fill={stroke} opacity={0.55}
-      />
-
-      <SvgText
-        x={cx} y={cy + 6 * s} fontSize={16 * s} fontWeight="900"
-        fill={numberColor} textAnchor="middle"
-      >
-        {number}
-      </SvgText>
-    </G>
-  );
-}
-
-/**
  * An empty base stays a base — the rotated square everyone who has kept a book
  * already reads. Only an OCCUPIED one becomes a jersey, which is what makes
  * "who is on second" answerable at a glance from the bleachers.
+ *
+ * The shirt itself comes from the shared Jersey component so every sport draws
+ * from one place; baseball asks for its own silhouette by name.
  */
 function Base({ base, runner, jersey, teamColors }) {
   const [x, y] = BASE_XY[base];
@@ -93,12 +43,11 @@ function Base({ base, runner, jersey, teamColors }) {
   }
 
   return (
-    <Jersey
-      cx={x} cy={y}
-      fill={teamColors.fill}
-      stroke={teamColors.onFill === '#FFFFFF' ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.2)'}
-      numberColor={teamColors.numberOn}
-      number={jersey ?? '•'}
+    <JerseyGlyph
+      kind={baseballTheme.jersey}
+      cx={x} cy={y} w={38}
+      colors={teamColors}
+      number={jersey}
     />
   );
 }

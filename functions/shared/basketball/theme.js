@@ -18,6 +18,9 @@ export const basketballTheme = {
   fieldStroke: '#0F172A',
   fieldFill: '#C88B4A',     // hardwood
   occupied: '#E2701E',
+
+  /** Sleeveless — see components/Jersey.jsx. */
+  jersey: 'basketball',
 };
 
 /** Sport-specific vocabulary, so shared screens can label themselves. */
