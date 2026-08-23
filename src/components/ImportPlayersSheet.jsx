@@ -9,7 +9,9 @@
  * which is the common case — a coach with a spring team starting a fall one.
  *
  * All the selection rules live in shared/rosterImport.js; this file is the
- * screen around them.
+ * screen around them — including the two things worth saying out loud on the
+ * screen itself: an imported player is the SAME player (career and parent
+ * links intact), and their number does not come with them.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -21,7 +23,7 @@ import { db, collection, getDocs } from '../services/firebase';
 import { importPlayers } from '../services/bootstrap.js';
 import { notify } from '../utils/confirm.js';
 import {
-  importSourceTeams, buildImportRows, defaultSelection, importPayloads, importSummary,
+  importSourceTeams, buildImportRows, defaultSelection, importSelection, importSummary,
 } from '../shared/rosterImport.js';
 import { useActiveTeam } from '../hooks/ActiveTeam.jsx';
 import { useMyTeamPlayers } from '../hooks/useMyTeamPlayers.js';
@@ -78,38 +80,32 @@ export default function ImportPlayersSheet({ visible, team, roster, onClose, onI
       : [...s, playerId]);
   }, []);
 
-  const allOn = !!rows?.length && selected.length === rows.length;
+  // "All" means everyone importable — players already on this roster can't be
+  // selected, so counting them would leave the button permanently half-on.
+  const selectable = useMemo(
+    () => (rows || []).filter((r) => !r.alreadyOnRoster), [rows]);
+  const allOn = !!selectable.length && selected.length === selectable.length;
   const toggleAll = useCallback(() => {
-    setSelected(allOn ? [] : (rows || []).map((r) => r.playerId));
-  }, [allOn, rows]);
+    setSelected(allOn ? [] : selectable.map((r) => r.playerId));
+  }, [allOn, selectable]);
 
   const runImport = useCallback(async () => {
-    const players = importPayloads(rows, selected);
+    const players = importSelection(rows, selected);
     if (!players.length) { notify('Pick at least one player.'); return; }
-
-    // Counted before the writes, by difference: how many numbers went in with
-    // a jersey and came out without one. Order-independent, so it survives
-    // anything importPayloads decides to drop.
-    const numbersCleared =
-      rows.filter((r) => selected.includes(r.playerId) && r.jerseyNumber != null).length
-      - players.filter((p) => p.jerseyNumber != null).length;
-
     setBusy(true);
     try {
-      const { added, failures } = await importPlayers({ teamId: team.id, players });
+      const { added, failures = [] } = await importPlayers({
+        fromTeamId: sourceId, toTeamId: team.id, players,
+      });
       notify(
         failures.length ? 'Imported with problems' : 'Players imported',
-        importSummary({
-          added: added.length,
-          failed: failures.length,
-          numbersCleared: Math.max(0, numbersCleared),
-        }),
+        importSummary({ added: added.length, failed: failures.length }),
       );
       onImported?.(added);
       onClose?.();
     } catch (e) { notify('Could not import', e.message); }
     setBusy(false);
-  }, [rows, selected, team?.id, onImported, onClose]);
+  }, [rows, selected, sourceId, team?.id, onImported, onClose]);
 
   if (!visible) return null;
 
@@ -125,8 +121,9 @@ export default function ImportPlayersSheet({ visible, team, roster, onClose, onI
         </Text>
         <Text style={styles.sub}>
           {source
-            ? "Everyone's checked. Uncheck anyone who isn't on this team, then import."
-            : 'Pick the team to copy players from. You can choose who comes over next.'}
+            ? "Everyone's checked. Uncheck anyone who isn't on this team. They keep "
+              + 'their stats and parent links; give them numbers on the roster.'
+            : 'Pick the team to import players from. You choose who comes over next.'}
         </Text>
 
         {/* ---- step 1: which team ------------------------------------- */}
@@ -163,7 +160,7 @@ export default function ImportPlayersSheet({ visible, team, roster, onClose, onI
           <>
             <View style={styles.listHead}>
               <Text style={styles.count}>
-                {selected.length} of {rows.length} selected
+                {selected.length} of {selectable.length} selected
               </Text>
               <Pressable onPress={toggleAll} hitSlop={6}>
                 <Text style={styles.link}>{allOn ? 'Clear all' : 'Select all'}</Text>
@@ -176,8 +173,9 @@ export default function ImportPlayersSheet({ visible, team, roster, onClose, onI
                 return (
                   <Pressable
                     key={r.playerId}
-                    onPress={() => toggle(r.playerId)}
-                    style={[styles.row, on && styles.rowOn]}
+                    onPress={() => !r.alreadyOnRoster && toggle(r.playerId)}
+                    disabled={r.alreadyOnRoster}
+                    style={[styles.row, on && styles.rowOn, r.alreadyOnRoster && styles.rowOff]}
                     accessibilityRole="checkbox"
                     accessibilityState={{ checked: on }}
                     accessibilityLabel={`${r.firstName} ${r.lastName}`.trim()}
@@ -187,20 +185,27 @@ export default function ImportPlayersSheet({ visible, team, roster, onClose, onI
                     </View>
                     <View style={styles.flex}>
                       <Text style={styles.name}>
-                        #{r.jerseyNumber ?? '–'} {r.firstName} {r.lastName}
+                        {r.firstName} {r.lastName}
                       </Text>
+                      {/* The old number identifies the row and nothing more —
+                          it is not what gets imported. */}
                       <Text style={styles.meta}>
                         {r.alreadyOnRoster
                           ? 'Already on this roster'
-                          : r.jerseyTaken
-                            ? `#${r.jerseyNumber} is taken here — they'll come over with no number`
-                            : (r.primaryPosition || 'No position')}
+                          : [r.formerJersey != null ? `Wore #${r.formerJersey}` : null,
+                             r.primaryPosition || null]
+                              .filter(Boolean).join(' · ') || 'No position'}
                       </Text>
                     </View>
                   </Pressable>
                 );
               })}
             </ScrollView>
+
+            <Text style={styles.note}>
+              Imported players keep their stats, career history and parent
+              links. Jersey numbers start blank — set them on the roster.
+            </Text>
           </>
         )}
 
@@ -253,6 +258,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm,
   },
   rowOn: { borderColor: colors.primary },
+  rowOff: { opacity: 0.5 },
   box: {
     width: 22, height: 22, borderRadius: 6, borderWidth: 1.5,
     borderColor: colors.line, backgroundColor: '#FFF',
@@ -264,6 +270,7 @@ const styles = StyleSheet.create({
   meta: { ...text.body, fontSize: 11.5, color: colors.pencil, marginTop: 2 },
   chev: { fontSize: 20, color: colors.pencil, paddingHorizontal: 4 },
   empty: { ...text.body, color: colors.pencil, textAlign: 'center', paddingVertical: 30, lineHeight: 19 },
+  note: { ...text.body, fontSize: 11.5, color: colors.pencil, lineHeight: 16, marginTop: 2 },
   actions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
   cta: { height: 48, borderRadius: radius.md, backgroundColor: colors.navy, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18 },
   ctaGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.line },

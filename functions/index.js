@@ -48,6 +48,24 @@ const requireAuth = (req) => {
   return req.auth.uid;
 };
 
+/**
+ * Every callable below that writes into a team gates on this.
+ *
+ * It was being CALLED by four of them and defined by none — invites.js has its
+ * own private copy, which this file never imported, so createPlayer,
+ * claimPlayer, backfillStatsAccess and finalizeGame each threw a
+ * ReferenceError the moment they were invoked.
+ */
+async function assertStaff(teamId, uid) {
+  if (!teamId) throw new HttpsError('invalid-argument', 'No team given.');
+  const snap = await db.doc(`teams/${teamId}/members/${uid}`).get();
+  const role = snap.data()?.role;
+  if (!['owner', 'coach'].includes(role)) {
+    throw new HttpsError('permission-denied', 'Coaches only.');
+  }
+  return role;
+}
+
 // ===========================================================================
 // Player identity and transfers
 // ===========================================================================
@@ -94,6 +112,82 @@ export const createPlayer = onCall(async (req) => {
 
   // Shown once, to the coach, with instructions to hand it to the parent.
   return { playerId: playerRef.id, careerCode: code };
+});
+
+/**
+ * Import players from one of your own teams onto another.
+ *
+ * This is NOT claimPlayer. There is no career code and no guardian approval,
+ * and the difference is the whole justification: claimPlayer exists so one
+ * organization cannot pull a child's record onto its roster on its own
+ * authority. Here the caller is already staff on BOTH teams — they can already
+ * read every one of these players — so the only thing that changes is which of
+ * their own rosters the child appears on. Both checks below are what make that
+ * sentence true, and neither may be relaxed to one team.
+ *
+ * The player record is JOINED to the new team, not copied. Same playerId, so
+ * career totals keep accumulating and existing parent links keep working.
+ *
+ * The jersey number is deliberately not carried: numbers belong to a season on
+ * a team, not to the child.
+ */
+export const importPlayers = onCall(async (req) => {
+  const uid = requireAuth(req);
+  const { fromTeamId, toTeamId, playerIds } = req.data || {};
+
+  if (fromTeamId === toTeamId) {
+    throw new HttpsError('invalid-argument', 'Those are the same team.');
+  }
+  // Staff on the source AND the destination. Source membership is what makes
+  // this not a data grab; destination membership is what makes it allowed.
+  await assertStaff(fromTeamId, uid);
+  await assertStaff(toTeamId, uid);
+
+  const ids = [...new Set(playerIds || [])].filter(Boolean);
+  if (!ids.length) throw new HttpsError('invalid-argument', 'No players given.');
+  if (ids.length > 60) {
+    throw new HttpsError('invalid-argument', 'Too many players in one import.');
+  }
+
+  const added = [];
+  const skipped = [];
+
+  for (const playerId of ids) {
+    // The id has to come off the source roster, not out of the request body —
+    // otherwise this is an arbitrary "add any player to my team" endpoint for
+    // anyone who can guess an id.
+    const fromRow = await db.doc(`teams/${fromTeamId}/roster/${playerId}`).get();
+    if (!fromRow.exists) { skipped.push({ playerId, reason: 'not-on-source' }); continue; }
+
+    const existing = await db.doc(`teams/${toTeamId}/roster/${playerId}`).get();
+    if (existing.exists) { skipped.push({ playerId, reason: 'already-here' }); continue; }
+
+    const player = (await db.doc(`players/${playerId}`).get()).data() || {};
+    const src = fromRow.data();
+
+    await db.doc(`teams/${toTeamId}/roster/${playerId}`).set({
+      // Denormalized so every member can render a scoreboard; /players stays
+      // gated to the people authorized on that child.
+      firstName: player.firstName ?? src.firstName ?? null,
+      lastName: player.lastName ?? src.lastName ?? null,
+      // A blank the coach fills in. See the header.
+      jerseyNumber: null,
+      primaryPosition: src.primaryPosition ?? null,
+      active: true,
+      addedAt: FieldValue.serverTimestamp(),
+      importedFrom: fromTeamId,
+    });
+
+    // syncPlayerAccess picks this up and recomputes both access lists, which
+    // is what lets the new team's members read the player and their stats.
+    await db.doc(`players/${playerId}`).update({
+      rosteredTeamIds: FieldValue.arrayUnion(toTeamId),
+    });
+
+    added.push(playerId);
+  }
+
+  return { added, skipped };
 });
 
 /**

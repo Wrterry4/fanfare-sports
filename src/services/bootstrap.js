@@ -170,30 +170,63 @@ export async function createPlayers(teamId, players) {
 }
 
 /**
- * Copy players onto a team, one at a time and forgiving of failures.
+ * Bring players from another of your teams onto this one.
  *
- * Deliberately NOT createPlayers(): a coach importing fourteen kids should not
- * lose the thirteen that worked because the fourth hit a permission error.
- * Each player is an independent create — they're independent documents anyway,
- * there is nothing to keep atomic — and the caller is told what didn't land.
+ * Identity is preserved: the same playerId is added to the new roster, so
+ * career totals keep accumulating and parents stay linked. Nothing is copied
+ * and no jersey number comes over — see shared/rosterImport.js.
  *
- * Copies rather than re-links: see the header of shared/rosterImport.js for
- * why a player record isn't shared across teams without a guardian saying so.
+ * @param players [{ playerId, firstName, lastName, primaryPosition }]
+ * @returns { added: [playerId], skipped: [{ playerId, reason }], failures: [] }
  */
-export async function importPlayers({ teamId, players }) {
+export async function importPlayers({ fromTeamId, toTeamId, players }) {
+  const rows = (players || []).filter((p) => p?.playerId);
+  if (!rows.length) return { added: [], skipped: [], failures: [] };
+
+  if (!SPARK_MODE) {
+    // The function re-checks staff on BOTH teams and is the only path that may
+    // touch rosteredTeamIds — no client rule permits that field, deliberately.
+    const res = await httpsCallable(functions, 'importPlayers')({
+      fromTeamId, toTeamId, playerIds: rows.map((p) => p.playerId),
+    });
+    return { failures: [], ...(res.data || {}) };
+  }
+
+  // ── Spark mode ──────────────────────────────────────────────────────────
+  //
+  // The roster entry is writable by staff, so the import itself works and the
+  // player keeps their id. What can't happen client-side is the
+  // rosteredTeamIds update: no rule allows it, because adding a team id is an
+  // indirect way of handing that team's staff a child's record. The
+  // consequence is that the new team's OTHER members can't read the imported
+  // player's record until this runs on Blaze — the importing coach, who is
+  // already authorized on them, sees everything.
   const added = [];
+  const skipped = [];
   const failures = [];
 
-  for (const p of players || []) {
+  for (const p of rows) {
     try {
-      const res = await createPlayer({ teamId, ...p });
-      added.push({ ...res, firstName: p.firstName, lastName: p.lastName });
+      const ref = doc(db, 'teams', toTeamId, 'roster', p.playerId);
+      const existing = await getDoc(ref);
+      if (existing.exists()) { skipped.push({ playerId: p.playerId, reason: 'already-here' }); continue; }
+
+      await setDoc(ref, {
+        firstName: (p.firstName || '').trim(),
+        lastName: (p.lastName || '').trim(),
+        jerseyNumber: null,
+        primaryPosition: p.primaryPosition ?? null,
+        active: true,
+        addedAt: serverTimestamp(),
+        importedFrom: fromTeamId,
+      });
+      added.push(p.playerId);
     } catch (e) {
-      failures.push({ player: p, message: e?.message || 'Could not add' });
+      failures.push({ playerId: p.playerId, message: e?.message || 'Could not add' });
     }
   }
 
-  return { added, failures };
+  return { added, skipped, failures };
 }
 
 // ---------------------------------------------------------------------------

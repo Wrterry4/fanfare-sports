@@ -2,39 +2,38 @@
  * rosterImport.js — Bringing last season's roster onto a new team.
  *
  * A coach who runs a spring team and a fall team usually has most of the same
- * kids. Typing fourteen names, numbers and positions in again is the single
- * longest piece of manual entry in the app, and it's entry they've already
- * done once.
+ * kids. Typing fourteen names in again is the longest piece of manual entry in
+ * the app, and it's entry they've already done once.
  *
- * The decisions that matter here, and why:
+ * ── Import pulls IDENTITY, not a copy ──────────────────────────────────────
  *
- *   Only teams you're STAFF on are offered. The roster of a team you follow as
- *   a parent is other people's children; copying it onto a team you coach is
- *   not a convenience, it's a data grab.
+ * The imported player keeps their playerId. That id is the whole point of
+ * having one: it's what career totals accumulate against across seasons, and
+ * what a parent is linked to. Creating a second record for the same child
+ * would silently fork both — a new player with no history whose parents can't
+ * see them, which looks like the import worked and is worse than not importing.
  *
- *   Everyone is checked by default, because "the same team, minus two" is the
- *   common case and unchecking two is less work than checking twelve. The one
- *   exception is a player already on this roster — they're listed so the coach
- *   can see they're accounted for, but importing them again would make a
- *   duplicate row, so they start unchecked.
+ * So the roster entry is the only thing created; the player record is joined
+ * to the new team, not duplicated.
  *
- *   A jersey number already worn on the destination team is dropped rather
- *   than imported. Two #12s break every scoreboard that identifies a player by
- *   number, and the coach is the only one who can say who changes.
+ * ── What does NOT come over ────────────────────────────────────────────────
  *
- * Import COPIES the player onto the new team; it does not move or merge the
- * player's identity. Putting one player record on two teams changes who can
- * read that child's record, which is a guardian's decision — that's what the
- * career-code transfer flow is for. See functions/index.js claimPlayer().
+ * The jersey number. It belongs to a season on a team, not to the child —
+ * numbers are reassigned every spring and two teams have no reason to agree.
+ * Carrying one over would quietly seed collisions on the new roster, and a
+ * wrong number is worse than a blank one because nobody thinks to check it.
+ * Position comes over as a starting point, since it describes the player.
+ *
+ * ── Who may be imported ────────────────────────────────────────────────────
+ *
+ * Only from teams you're STAFF on. The roster of a team you follow as a parent
+ * is other people's children, and pulling it onto a team you coach is not a
+ * convenience.
  */
 
 const STAFF_ROLES = ['owner', 'coach'];
 
 const clean = (s) => (s ?? '').toString().trim();
-
-/** Names match on case and spacing, so "jack  miller" finds "Jack Miller". */
-export const personKey = (p) =>
-  `${clean(p?.firstName)} ${clean(p?.lastName)}`.toLowerCase().replace(/\s+/g, ' ').trim();
 
 const millis = (v) => {
   if (!v) return 0;
@@ -47,8 +46,8 @@ const millis = (v) => {
 /**
  * The teams offered in the picker: every OTHER team you coach.
  *
- * @param teams        every team you're on, from useTeams()
- * @param roleByTeam   { [teamId]: role } from useMyTeamPlayers()
+ * @param teams          every team you're on, from useTeams()
+ * @param roleByTeam     { [teamId]: role } from useMyTeamPlayers()
  * @param currentTeamId  the team being imported INTO, always excluded
  * @returns teams, newest first — last season is the one being copied
  */
@@ -63,75 +62,65 @@ export function importSourceTeams(teams, roleByTeam = {}, currentTeamId = null) 
 /**
  * One row per player on the source team, annotated against the destination.
  *
- * @param sourceRoster  roster rows of the team being copied FROM
- * @param targetRoster  roster rows of the team being copied INTO
- * @returns [{ playerId, firstName, lastName, jerseyNumber, primaryPosition,
- *             alreadyOnRoster, jerseyTaken, selected }]
+ * Already-on-roster is decided by playerId, not by name: same identity, same
+ * id, exactly. Two different kids called Jack Miller stay two rows.
+ *
+ * @param sourceRoster  roster rows of the team being imported FROM
+ * @param targetRoster  roster rows of the team being imported INTO
+ * @returns [{ playerId, firstName, lastName, formerJersey, primaryPosition,
+ *             alreadyOnRoster, selected }]
  */
 export function buildImportRows(sourceRoster, targetRoster = []) {
-  const onTarget = new Set((targetRoster || []).map(personKey).filter(Boolean));
-  const takenNumbers = new Set(
-    (targetRoster || [])
-      .map((p) => p?.jerseyNumber)
-      .filter((n) => n != null)
-      .map(Number)
-  );
+  const onTarget = new Set((targetRoster || []).map((p) => p?.playerId).filter(Boolean));
 
   return (sourceRoster || [])
     .filter((p) => p?.playerId)
     .map((p) => {
-      const jerseyNumber = p.jerseyNumber == null ? null : Number(p.jerseyNumber);
-      const alreadyOnRoster = onTarget.has(personKey(p));
+      const alreadyOnRoster = onTarget.has(p.playerId);
       return {
         playerId: p.playerId,
         firstName: clean(p.firstName),
         lastName: clean(p.lastName),
-        jerseyNumber,
+        // Shown only so the coach recognizes the row. It is NOT imported —
+        // see the header.
+        formerJersey: p.jerseyNumber == null ? null : Number(p.jerseyNumber),
         primaryPosition: p.primaryPosition ?? null,
         alreadyOnRoster,
-        jerseyTaken: jerseyNumber != null && takenNumbers.has(jerseyNumber),
         selected: !alreadyOnRoster,
       };
     })
-    .sort((a, b) => (a.jerseyNumber ?? 999) - (b.jerseyNumber ?? 999)
+    .sort((a, b) => (a.formerJersey ?? 999) - (b.formerJersey ?? 999)
                  || a.firstName.localeCompare(b.firstName));
 }
 
-/** The ids checked when the list first opens. */
+/** The ids checked when the list first opens — everyone not already here. */
 export const defaultSelection = (rows) =>
   (rows || []).filter((r) => r.selected).map((r) => r.playerId);
 
 /**
- * What actually gets written, in list order.
+ * What actually gets sent, in list order.
  *
- * Numbers are resolved against the destination AND against the rest of this
- * import, so two imported players can't collide with each other either.
+ * Identity only. Names travel because the roster entry denormalizes them for
+ * the whole team to read; the number is deliberately absent.
  */
-export function importPayloads(rows, selectedIds) {
+export function importSelection(rows, selectedIds) {
   const chosen = new Set(selectedIds || []);
-  const used = new Set();
-
   return (rows || [])
     .filter((r) => chosen.has(r.playerId))
-    .map((r) => {
-      const free = r.jerseyNumber != null && !r.jerseyTaken && !used.has(r.jerseyNumber);
-      if (free) used.add(r.jerseyNumber);
-      return {
-        firstName: r.firstName,
-        lastName: r.lastName,
-        jerseyNumber: free ? r.jerseyNumber : null,
-        primaryPosition: r.primaryPosition ?? null,
-      };
-    })
-    .filter((p) => p.firstName || p.lastName);
+    // Someone already on this roster has nothing to import — re-sending them
+    // would only overwrite the number they were just given here.
+    .filter((r) => !r.alreadyOnRoster)
+    .map((r) => ({
+      playerId: r.playerId,
+      firstName: r.firstName,
+      lastName: r.lastName,
+      primaryPosition: r.primaryPosition ?? null,
+    }));
 }
 
-/** "3 players added · 1 number cleared" — plain enough to put in a toast. */
-export function importSummary({ added = 0, failed = 0, numbersCleared = 0 } = {}) {
+/** "3 players added · 1 couldn't be added" — plain enough to put in a toast. */
+export function importSummary({ added = 0, failed = 0 } = {}) {
   const parts = [`${added} player${added === 1 ? '' : 's'} added`];
-  if (numbersCleared) {
-    parts.push(`${numbersCleared} number${numbersCleared === 1 ? '' : 's'} cleared`);
-  }
   if (failed) parts.push(`${failed} couldn't be added`);
   return parts.join(' · ');
 }
