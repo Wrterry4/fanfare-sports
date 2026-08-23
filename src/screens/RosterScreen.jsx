@@ -43,8 +43,6 @@ import { inputStyle } from '../theme/inputs.js';
 export default function RosterScreen() {
   const { team, game, allGames, roster, loading } = useGameDay();
   const surface = useTeamSurface();
-  const sportTheme = sportThemeOf(sportForTeam(team));
-  const teamColors = resolveTeamColor(team);
   const { isStaff, isFan } = useMyRole();
   const [tab, setTab] = useState('roster');
   const [adding, setAdding] = useState(false);
@@ -90,6 +88,11 @@ export default function RosterScreen() {
 // ---------------------------------------------------------------------------
 
 function RosterTab({ team, roster, adding, onDoneAdding }) {
+  // Resolved here rather than in RosterScreen: this is the component that
+  // renders the rows, and the shirt needs both the sport's silhouette and the
+  // team's colours.
+  const sportTheme = sportThemeOf(sportForTeam(team));
+  const teamColors = resolveTeamColor(team);
   const { isStaff, linkedPlayerIds } = useMyRole();
   const [myClaims, setMyClaims] = useState([]);
   const [editingId, setEditingId] = useState(null);

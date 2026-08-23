@@ -45,7 +45,7 @@ function Base({ base, runner, jersey, teamColors }) {
   return (
     <JerseyGlyph
       kind={baseballTheme.jersey}
-      cx={x} cy={y} w={38}
+      cx={x} cy={y} w={46}
       colors={teamColors}
       number={jersey}
     />

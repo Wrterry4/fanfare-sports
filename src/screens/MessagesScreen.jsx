@@ -24,14 +24,13 @@ import {
 import AppHeader, { SegmentedTabs } from '../components/AppHeader.jsx';
 import AccountSheet from '../components/AccountSheet.jsx';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
-import { useTeamSurface } from '../theme/useSportTheme.js';
+import { useTeamSurface, useTeamColor } from '../theme/useSportTheme.js';
 import { bubbleColors } from '../shared/teamColors.js';
 import { multilineStyle } from '../theme/inputs.js';
 
 export default function MessagesScreen() {
   const { team, loading } = useGameDay();
   const surface = useTeamSurface();
-  const bubbles = bubbleColors(team);
   const { user } = useAuth();
   const [tab, setTab] = useState('team');
   const [members, setMembers] = useState([]);
@@ -164,6 +163,9 @@ function DirectList({ members, user, onOpen }) {
 }
 
 function MessageList({ messages, user, onSend, placeholder }) {
+  // Read from the active team here rather than threaded down through
+  // ChannelThread and Thread, neither of which otherwise needs a team colour.
+  const bubbles = bubbleColors(useTeamColor());
   const [draft, setDraft] = useState('');
   const scroller = React.useRef(null);
 
