@@ -30,6 +30,7 @@ import AccountSheet from '../components/AccountSheet.jsx';
 import { useMyRole } from '../hooks/useMyRole.js';
 import DraggableList, { ROW_HEIGHT } from '../components/DraggableList.jsx';
 import LinkParentSheet from '../components/LinkParentSheet.jsx';
+import ImportPlayersSheet from '../components/ImportPlayersSheet.jsx';
 import PlayerCardScreen from './PlayerCardScreen.jsx';
 import { sportForTeam } from '../sports/registry.js';
 import { requestPlayerClaim, subscribeMyClaims } from '../services/membership.js';
@@ -99,6 +100,7 @@ function RosterTab({ team, roster, adding, onDoneAdding }) {
   const [walkUp, setWalkUp] = useState(null);
   const [linkFor, setLinkFor] = useState(null);
   const [cardFor, setCardFor] = useState(null);
+  const [importing, setImporting] = useState(false);
   const [withAudio, setWithAudio] = useState({});
 
   useEffect(() => {
@@ -148,8 +150,25 @@ function RosterTab({ team, roster, adding, onDoneAdding }) {
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         {adding && isStaff && <AddPlayerForm team={team} onDone={onDoneAdding} />}
 
+        {/* Second in the visual order, first in usefulness for a coach who ran
+            a team last season — but ADD stays the primary action, because a
+            brand-new coach has nothing to import from. */}
+        {isStaff && (
+          <Pressable onPress={() => setImporting(true)}
+            style={[styles.cta, styles.ctaGhost, styles.importBtn]}
+            accessibilityRole="button">
+            <Text style={[styles.ctaText, { color: colors.primary }]}>
+              ⤓ IMPORT FROM ANOTHER TEAM
+            </Text>
+          </Pressable>
+        )}
+
         {roster.length === 0 && !adding && (
-          <Text style={styles.empty}>No players yet. Tap ADD to start your roster.</Text>
+          <Text style={styles.empty}>
+            {isStaff
+              ? 'No players yet. Tap ADD to start your roster, or import last season\'s.'
+              : 'No players yet.'}
+          </Text>
         )}
 
         {roster.map((p) => (
@@ -180,6 +199,18 @@ function RosterTab({ team, roster, adding, onDoneAdding }) {
         team={team}
         onClose={() => setCardFor(null)}
       />
+
+      {/* Mounted only while open: the sheet subscribes to your membership on
+          every team to work out which ones you coach, and that has no business
+          running while nobody's importing. */}
+      {importing && (
+        <ImportPlayersSheet
+          visible
+          team={team}
+          roster={roster}
+          onClose={() => setImporting(false)}
+        />
+      )}
 
       <LinkParentSheet
         visible={!!linkFor}
@@ -629,6 +660,7 @@ const styles = StyleSheet.create({
   iconBtnOn: { backgroundColor: colors.gold, borderColor: colors.gold },
   iconBtnTextOn: { color: colors.navy, fontSize: 14 },
   chev: { fontSize: 16, color: colors.pencil, paddingHorizontal: 4 },
+  importBtn: { borderColor: colors.primary, marginBottom: spacing.md },
   empty: { ...text.body, color: colors.pencil, textAlign: 'center', paddingVertical: 30 },
   msg: { ...text.body, color: colors.pencil, textAlign: 'center' },
   lineupHint: { ...text.body, fontSize: 12.5, color: colors.pencil, marginBottom: spacing.md, lineHeight: 18 },

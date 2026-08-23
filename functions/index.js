@@ -59,7 +59,7 @@ const requireAuth = (req) => {
  */
 export const createPlayer = onCall(async (req) => {
   const uid = requireAuth(req);
-  const { firstName, lastName, birthYear, teamId, jerseyNumber } = req.data;
+  const { firstName, lastName, birthYear, teamId, jerseyNumber, primaryPosition } = req.data;
   await assertStaff(teamId, uid);
 
   const code = generateCareerCode();
@@ -79,8 +79,14 @@ export const createPlayer = onCall(async (req) => {
       rotatedAt: FieldValue.serverTimestamp(),
     });
     tx.set(db.doc(`teams/${teamId}/roster/${playerRef.id}`), {
+      // Names are denormalized onto the roster entry because that is what the
+      // whole team can read — /players is gated to the people authorized on
+      // that child, so a roster row without a name renders as a bare id for
+      // everyone but the coach.
+      firstName,
+      lastName: lastName ?? null,
       jerseyNumber: jerseyNumber ?? null,
-      primaryPosition: null,
+      primaryPosition: primaryPosition ?? null,
       active: true,
       addedAt: FieldValue.serverTimestamp(),
     });

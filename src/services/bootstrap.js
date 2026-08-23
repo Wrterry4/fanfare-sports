@@ -125,7 +125,7 @@ export async function createTeam({ name, season, division, ageGroup, sport = 'ba
 export async function createPlayer({ teamId, firstName, lastName, birthYear, jerseyNumber, primaryPosition }) {
   if (!SPARK_MODE) {
     const res = await httpsCallable(functions, 'createPlayer')({
-      teamId, firstName, lastName, birthYear, jerseyNumber,
+      teamId, firstName, lastName, birthYear, jerseyNumber, primaryPosition,
     });
     return res.data;
   }
@@ -167,6 +167,33 @@ export async function createPlayers(teamId, players) {
     created.push(await createPlayer({ teamId, ...p }));
   }
   return created;
+}
+
+/**
+ * Copy players onto a team, one at a time and forgiving of failures.
+ *
+ * Deliberately NOT createPlayers(): a coach importing fourteen kids should not
+ * lose the thirteen that worked because the fourth hit a permission error.
+ * Each player is an independent create — they're independent documents anyway,
+ * there is nothing to keep atomic — and the caller is told what didn't land.
+ *
+ * Copies rather than re-links: see the header of shared/rosterImport.js for
+ * why a player record isn't shared across teams without a guardian saying so.
+ */
+export async function importPlayers({ teamId, players }) {
+  const added = [];
+  const failures = [];
+
+  for (const p of players || []) {
+    try {
+      const res = await createPlayer({ teamId, ...p });
+      added.push({ ...res, firstName: p.firstName, lastName: p.lastName });
+    } catch (e) {
+      failures.push({ player: p, message: e?.message || 'Could not add' });
+    }
+  }
+
+  return { added, failures };
 }
 
 // ---------------------------------------------------------------------------
