@@ -11,7 +11,6 @@ import {
   View, Text, TextInput, Pressable, StyleSheet, ScrollView, Switch,
   ActivityIndicator, Platform, KeyboardAvoidingView, Share,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { db, doc, updateDoc } from '../services/firebase';
 import { useGameDay } from '../hooks/useGameDay.js';
@@ -31,6 +30,8 @@ import TeamColorPicker from '../components/TeamColorPicker.jsx';
 import { ensureStatsAccess } from '../services/statsService.js';
 import { BUILD_INFO } from '../generated/buildInfo.js';
 import { formatBuildLabel } from '../shared/buildLabel.js';
+import ScreenRoot from '../components/ScreenRoot.jsx';
+import Centered from '../components/Centered.jsx';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 import { useTeamSurface } from '../theme/useSportTheme.js';
 import { inputStyle } from '../theme/inputs.js';
@@ -177,7 +178,7 @@ export default function SettingsScreen() {
   const paneTitle = PANES.find(([k]) => k === pane)?.[1];
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: surface }]} edges={['top']}>
+    <ScreenRoot style={[styles.root, { backgroundColor: surface }]}>
       <AppHeader
         team={team}
         onMenu={() => setMenu(true)}
@@ -422,7 +423,7 @@ export default function SettingsScreen() {
 
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </ScreenRoot>
   );
 }
 
@@ -480,10 +481,6 @@ const Section = ({ title, sub, children }) => (
   </View>
 );
 
-const Centered = ({ children }) => (
-  <SafeAreaView style={styles.centered}>{children}</SafeAreaView>
-);
-
 const styles = StyleSheet.create({
   presetBtn: {
     height: 46, borderRadius: 10, borderWidth: 1, borderColor: colors.line,
@@ -492,7 +489,6 @@ const styles = StyleSheet.create({
   presetBtnText: { ...text.buttonSecondary, fontSize: 11, color: colors.navy, letterSpacing: 0.6 },
   root: { flex: 1, backgroundColor: colors.chalk },
   flex: { flex: 1 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chalk, padding: spacing.xl },
   header: { backgroundColor: colors.navy, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   h1: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 18, color: '#FFF' },
   h2: { ...text.body, fontSize: 12, color: '#A8B0C6', marginTop: 2 },

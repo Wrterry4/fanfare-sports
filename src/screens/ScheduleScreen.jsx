@@ -13,7 +13,6 @@ import {
   View, Text, TextInput, Pressable, StyleSheet, ScrollView,
   ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { db, collection, query, orderBy, onSnapshot } from '../services/firebase';
 import { useGameDay } from '../hooks/useGameDay.js';
@@ -33,6 +32,8 @@ import { DateField, TimeField, combineDateTime, splitDateTime } from '../compone
 import AppHeader, { HeaderButton } from '../components/AppHeader.jsx';
 import FinalLineScore from '../components/FinalLineScore.jsx';
 import AccountSheet from '../components/AccountSheet.jsx';
+import ScreenRoot from '../components/ScreenRoot.jsx';
+import Centered from '../components/Centered.jsx';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 import { useTeamSurface } from '../theme/useSportTheme.js';
 import { inputStyle, multilineStyle } from '../theme/inputs.js';
@@ -95,7 +96,7 @@ export default function ScheduleScreen() {
   if (!team) return <Centered><Text style={styles.msg}>No team yet.</Text></Centered>;
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: surface }]} edges={['top']}>
+    <ScreenRoot style={[styles.root, { backgroundColor: surface }]}>
       <AppHeader
         team={team}
         onMenu={() => setMenu(true)}
@@ -175,7 +176,7 @@ export default function ScheduleScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </ScreenRoot>
   );
 }
 
@@ -601,10 +602,6 @@ function ScheduleViewSwitch({ value, onChange }) {
     file. */
 function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
 
-const Centered = ({ children }) => (
-  <SafeAreaView style={styles.centered}>{children}</SafeAreaView>
-);
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.chalk },
   flex: { flex: 1 },
@@ -639,7 +636,6 @@ const styles = StyleSheet.create({
     height: 1, backgroundColor: colors.line,
     marginHorizontal: spacing.md, marginTop: spacing.sm, marginBottom: spacing.md,
   },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chalk, padding: spacing.xl },
   header: { backgroundColor: colors.navy, paddingHorizontal: spacing.lg, paddingVertical: spacing.md, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   h1: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 18, color: '#FFF' },
   h2: { ...text.body, fontSize: 12, color: '#A8B0C6', marginTop: 2 },

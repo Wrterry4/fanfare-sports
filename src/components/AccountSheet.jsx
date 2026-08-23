@@ -26,7 +26,8 @@ import { useMyTeamPlayers } from '../hooks/useMyTeamPlayers.js';
 import { useTeamInvites } from '../hooks/useTeamInvites.js';
 import { respondToTeamInvite } from '../services/teamInvites.js';
 import { inviteWording } from '../shared/teamInvites.js';
-import { groupTeamsByPlayer, groupingIsUseful } from '../shared/teamGrouping.js';
+import { groupTeamsByPlayer, groupingIsUseful, duplicateGroups }
+  from '../shared/teamGrouping.js';
 import NewTeamSheet from './NewTeamSheet.jsx';
 import { signOut } from '../services/authService.js';
 import { confirm, notify } from '../utils/confirm.js';
@@ -53,6 +54,9 @@ export default function AccountSheet({ visible, onClose }) {
     () => groupTeamsByPlayer(teams, byTeam, roleByTeam),
     [teams, byTeam, roleByTeam]);
   const showHeadings = groupingIsUseful(grouped);
+  // Two headings with the same name are two player records for one child —
+  // worth explaining once, under the list, rather than in every heading.
+  const duplicates = useMemo(() => duplicateGroups(grouped), [grouped]);
 
   useEffect(() => {
     if (!visible || !user?.uid) return;
@@ -291,6 +295,15 @@ export default function AccountSheet({ visible, onClose }) {
               ))}
               {teams.length === 0 && (
                 <Text style={styles.hint}>You're not on a team yet.</Text>
+              )}
+
+              {duplicates.length > 0 && (
+                <Text style={styles.hint}>
+                  The same name appears more than once above. Those are separate
+                  player records, not one child on two teams — usually a player
+                  entered twice. Open that team's Roster and remove the extra
+                  one; the record you keep holds the stats and the parent links.
+                </Text>
               )}
 
               {/* Creating a team lived only in the first-run wizard, which is

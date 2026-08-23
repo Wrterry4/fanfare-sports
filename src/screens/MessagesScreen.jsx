@@ -11,7 +11,6 @@ import {
   View, Text, TextInput, Pressable, StyleSheet, ScrollView,
   ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   db, collection, query, orderBy, onSnapshot, addDoc, doc, updateDoc, serverTimestamp,
@@ -23,6 +22,8 @@ import {
 } from '../services/membership.js';
 import AppHeader, { SegmentedTabs } from '../components/AppHeader.jsx';
 import AccountSheet from '../components/AccountSheet.jsx';
+import ScreenRoot from '../components/ScreenRoot.jsx';
+import Centered from '../components/Centered.jsx';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 import { useTeamSurface, useTeamColor } from '../theme/useSportTheme.js';
 import { bubbleColors } from '../shared/teamColors.js';
@@ -46,7 +47,7 @@ export default function MessagesScreen() {
   if (!team) return <Centered><Text style={styles.msg}>No team yet.</Text></Centered>;
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: surface }]} edges={['top']}>
+    <ScreenRoot style={[styles.root, { backgroundColor: surface }]}>
       {openDm ? (
         // In a thread the other person's name is centred on the back row,
         // which is where a messaging app puts it.
@@ -71,7 +72,7 @@ export default function MessagesScreen() {
         : tab === 'team'
           ? <ChannelThread teamId={team.id} user={user} channel="chatter" />
           : <DirectList members={members} user={user} onOpen={setOpenDm} />}
-    </SafeAreaView>
+    </ScreenRoot>
   );
 }
 
@@ -166,6 +167,7 @@ function MessageList({ messages, user, onSend, placeholder }) {
   // Read from the active team here rather than threaded down through
   // ChannelThread and Thread, neither of which otherwise needs a team colour.
   const bubbles = bubbleColors(useTeamColor());
+  const surface = useTeamSurface();
   const [draft, setDraft] = useState('');
   const scroller = React.useRef(null);
 
@@ -205,7 +207,9 @@ function MessageList({ messages, user, onSend, placeholder }) {
         })}
       </ScrollView>
 
-      <View style={styles.composer}>
+      {/* The composer is part of the page, not a card floating on it — a
+          fixed white bar under a themed thread read as an unstyled strip. */}
+      <View style={[styles.composer, { backgroundColor: surface }]}>
         <TextInput value={draft} onChangeText={setDraft} style={[multilineStyle, styles.flex]}
           placeholder={placeholder} placeholderTextColor="#A0A8B8" multiline />
         <Pressable onPress={submit} style={styles.send}>
@@ -216,14 +220,9 @@ function MessageList({ messages, user, onSend, placeholder }) {
   );
 }
 
-const Centered = ({ children }) => (
-  <SafeAreaView style={styles.centered}>{children}</SafeAreaView>
-);
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.chalk },
   flex: { flex: 1 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chalk, padding: spacing.xl },
   header: { backgroundColor: colors.navy, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   h1: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 18, color: '#FFF', marginBottom: spacing.sm },
   tabs: { flexDirection: 'row', gap: 6 },
@@ -257,7 +256,7 @@ const styles = StyleSheet.create({
   body: { ...text.body, fontSize: 15, lineHeight: 20 },
   composer: {
     flexDirection: 'row', gap: spacing.sm, padding: spacing.md,
-    borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.card,
+    borderTopWidth: 1, borderTopColor: colors.line,
   },
   send: { paddingHorizontal: 16, borderRadius: radius.md, backgroundColor: colors.navy, alignItems: 'center', justifyContent: 'center' },
   sendText: { ...text.buttonSecondary, fontSize: 11, color: '#FFF', letterSpacing: 0.8 },

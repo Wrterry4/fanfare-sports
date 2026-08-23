@@ -17,7 +17,6 @@ import {
   View, Text, TextInput, Pressable, StyleSheet, ScrollView,
   ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { db, doc, updateDoc, deleteDoc, serverTimestamp } from '../services/firebase';
 import { useGameDay } from '../hooks/useGameDay.js';
@@ -34,6 +33,8 @@ import ImportPlayersSheet from '../components/ImportPlayersSheet.jsx';
 import PlayerCardScreen from './PlayerCardScreen.jsx';
 import { sportForTeam } from '../sports/registry.js';
 import { requestPlayerClaim, subscribeMyClaims } from '../services/membership.js';
+import ScreenRoot from '../components/ScreenRoot.jsx';
+import Centered from '../components/Centered.jsx';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 import { useTeamSurface, sportThemeOf } from '../theme/useSportTheme.js';
 import { resolveTeamColor } from '../shared/teamColors.js';
@@ -54,7 +55,7 @@ export default function RosterScreen() {
   if (!team) return <Centered><Text style={styles.msg}>No team yet.</Text></Centered>;
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: surface }]} edges={['top']}>
+    <ScreenRoot style={[styles.root, { backgroundColor: surface }]}>
       <AppHeader
         team={team}
         onMenu={() => setMenu(true)}
@@ -84,7 +85,7 @@ export default function RosterScreen() {
         ? <RosterTab team={team} roster={roster} formerPlayers={formerPlayers}
                      adding={adding} onDoneAdding={() => setAdding(false)} />
         : <LineupTab team={team} games={allGames} currentGame={game} roster={roster} />}
-    </SafeAreaView>
+    </ScreenRoot>
   );
 }
 
@@ -192,10 +193,31 @@ function RosterTab({ team, roster, formerPlayers = [], adding, onDoneAdding }) {
       <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
         {adding && isStaff && <AddPlayerForm team={team} onDone={onDoneAdding} />}
 
-        {/* Second in the visual order, first in usefulness for a coach who ran
-            a team last season — but ADD stays the primary action, because a
-            brand-new coach has nothing to import from. */}
-        {isStaff && (
+        {/* An empty roster is the one moment importing is worth more than
+            typing, so on a new team it's a card rather than a line of text
+            under a button people have to notice first. */}
+        {roster.length === 0 && !adding && isStaff && (
+          <View style={styles.startCard}>
+            <Text style={styles.startTitle}>Start your roster</Text>
+            <Text style={styles.startBody}>
+              Type players in with ADD above — or bring them over from another
+              team you coach. Imported players keep their stats, career history
+              and parent links.
+            </Text>
+            <Pressable onPress={() => setImporting(true)} style={styles.cta}
+              accessibilityRole="button">
+              <Text style={styles.ctaText}>⤓ IMPORT FROM ANOTHER TEAM</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {roster.length === 0 && !adding && !isStaff && (
+          <Text style={styles.empty}>No players yet.</Text>
+        )}
+
+        {/* Once there are players, ADD is the common action and this steps
+            back to a quiet second. */}
+        {roster.length > 0 && isStaff && (
           <Pressable onPress={() => setImporting(true)}
             style={[styles.cta, styles.ctaGhost, styles.importBtn]}
             accessibilityRole="button">
@@ -203,14 +225,6 @@ function RosterTab({ team, roster, formerPlayers = [], adding, onDoneAdding }) {
               ⤓ IMPORT FROM ANOTHER TEAM
             </Text>
           </Pressable>
-        )}
-
-        {roster.length === 0 && !adding && (
-          <Text style={styles.empty}>
-            {isStaff
-              ? 'No players yet. Tap ADD to start your roster, or import last season\'s.'
-              : 'No players yet.'}
-          </Text>
         )}
 
         {roster.map((p) => (
@@ -580,7 +594,11 @@ function LineupTab({ team, games, currentGame, roster }) {
   };
 
   if (!games?.length) {
-    return <Centered><Text style={styles.msg}>Add a game first, then set its lineup.</Text></Centered>;
+    return (
+      <Centered inset={false}>
+        <Text style={styles.msg}>Add a game first, then set its lineup.</Text>
+      </Centered>
+    );
   }
 
   return (
@@ -684,14 +702,9 @@ const shortDate = (d) => {
   return date.toLocaleDateString(undefined, { month: 'numeric', day: 'numeric' });
 };
 
-const Centered = ({ children }) => (
-  <SafeAreaView style={styles.centered}>{children}</SafeAreaView>
-);
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.chalk },
   flex: { flex: 1 },
-  centered: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chalk, padding: spacing.xl },
   header: { backgroundColor: colors.navy, paddingHorizontal: spacing.lg, paddingVertical: spacing.md },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
   h1: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 18, color: '#FFF' },
@@ -737,6 +750,13 @@ const styles = StyleSheet.create({
   iconBtnTextOn: { color: colors.navy, fontSize: 14 },
   chev: { fontSize: 16, color: colors.pencil, paddingHorizontal: 4 },
   importBtn: { borderColor: colors.primary, marginBottom: spacing.md },
+  startCard: {
+    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.primary,
+    borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.md,
+    ...shadow.card,
+  },
+  startTitle: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 16, color: colors.navy },
+  startBody: { ...text.body, fontSize: 12.5, color: colors.pencil, lineHeight: 18, marginTop: 6, marginBottom: spacing.md },
   formerBlock: { marginTop: spacing.xl },
   formerHead: { ...text.label, color: colors.pencil, marginBottom: spacing.sm },
   formerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, opacity: 0.7 },

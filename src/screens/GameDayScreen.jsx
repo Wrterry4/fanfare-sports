@@ -14,7 +14,6 @@ import {
   View, Text, Pressable, StyleSheet, ActivityIndicator, useWindowDimensions,
   Modal, ScrollView,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 
 import AppHeader from '../components/AppHeader.jsx';
@@ -41,6 +40,8 @@ import { requestBaton, approveBaton, denyBaton } from '../services/gameService.j
 import { db, doc, updateDoc } from '../services/firebase';
 import { confirm, notify } from '../utils/confirm.js';
 import { finalizeGameStats, FINALIZE } from '../services/finalizeStats.js';
+import ScreenRoot from '../components/ScreenRoot.jsx';
+import Centered from '../components/Centered.jsx';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 import { sportThemeOf } from '../theme/useSportTheme.js';
 
@@ -90,18 +91,18 @@ export default function GameDayScreen() {
   );
 
   if (loading) {
-    return <Shell header={header} surface={surface}><Centered><ActivityIndicator color={colors.primary} /></Centered></Shell>;
+    return <Shell header={header} surface={surface}><Centered inset={false}><ActivityIndicator color={colors.primary} /></Centered></Shell>;
   }
   if (error) {
-    return <Shell header={header} surface={surface}><Centered><Text style={styles.msg}>{error.message}</Text></Centered></Shell>;
+    return <Shell header={header} surface={surface}><Centered inset={false}><Text style={styles.msg}>{error.message}</Text></Centered></Shell>;
   }
   if (!team) {
-    return <Shell header={header} surface={surface}><Centered><Text style={styles.msg}>No team yet.</Text></Centered></Shell>;
+    return <Shell header={header} surface={surface}><Centered inset={false}><Text style={styles.msg}>No team yet.</Text></Centered></Shell>;
   }
   if (!shown || !config) {
     return (
       <Shell header={header} surface={surface}>
-        <Centered>
+        <Centered inset={false}>
           <Text style={styles.emptyTitle}>No game scheduled</Text>
           <Text style={styles.msg}>Add one from the Schedule tab and start it there.</Text>
         </Centered>
@@ -333,7 +334,7 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
     });
   }, [state?.status, team.id, game.id]);
 
-  if (!state) return <Centered><ActivityIndicator color={colors.primary} /></Centered>;
+  if (!state) return <Centered inset={false}><ActivityIndicator color={colors.primary} /></Centered>;
 
   /**
    * Everything this screen knows about the sport comes through the presenter.
@@ -421,7 +422,7 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
   const showField = sport.HAS_FIELD_VISUAL !== false;
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: teamColors.surface }]} edges={['top']}>
+    <ScreenRoot style={[styles.root, { backgroundColor: teamColors.surface }]}>
       {/* Absolutely positioned and non-interactive — see MomentBanner.jsx.
           Placed first so it overlays everything below regardless of where
           in the tree it sits. */}
@@ -643,7 +644,7 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
         }}
         onClose={() => setSubSheet(null)}
       />
-    </SafeAreaView>
+    </ScreenRoot>
   );
 }
 
@@ -1008,23 +1009,15 @@ const ordinal = (n) => {
 
 /** Keeps the header on screen for the loading and empty states too. */
 const Shell = ({ header, children, surface }) => (
-  <SafeAreaView style={[styles.root, surface && { backgroundColor: surface }]} edges={['top']}>
+  <ScreenRoot style={[styles.root, surface && { backgroundColor: surface }]}>
     {header}
     {children}
-  </SafeAreaView>
-);
-
-const Centered = ({ children }) => (
-  <View style={styles.centered}>{children}</View>
+  </ScreenRoot>
 );
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.chalk },
   flex: { flex: 1 },
-  centered: {
-    flex: 1, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: colors.chalk, padding: spacing.xl,
-  },
   emptyTitle: {
     fontFamily: 'Archivo', fontWeight: '800', fontSize: 17,
     color: colors.navy, marginBottom: 6,

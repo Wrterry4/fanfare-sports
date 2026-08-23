@@ -2,7 +2,7 @@
  * teamGrouping.test.js — The team switcher, grouped by child.
  */
 
-import { groupTeamsByPlayer, groupingIsUseful, UNLINKED_KEY }
+import { groupTeamsByPlayer, groupingIsUseful, duplicateGroups, UNLINKED_KEY }
   from '../src/shared/teamGrouping.js';
 
 let passed = 0, failed = 0;
@@ -81,5 +81,50 @@ ok('undefined input does not throw', groupTeamsByPlayer(undefined, undefined).le
   ok('a child with no first name still groups', g[0].label === 'Your player');
 }
 
-console.log(`\n${passed} passed, ${failed} failed`);
+
+
+console.log('\nThe label is not the identity');
+{
+  // Two unrelated Jacks. One id each, so two groups — but "Jack" twice is
+  // useless as a label.
+  const two = groupTeamsByPlayer([seminoles, fury], {
+    t1: [{ playerId: 'p1', firstName: 'Jack', lastName: 'Miller' }],
+    t2: [{ playerId: 'p2', firstName: 'Jack', lastName: 'Rivera' }],
+  });
+  ok('still two groups, keyed by playerId', two.length === 2
+    && two[0].playerId !== two[1].playerId);
+  ok('labels gain a last initial',
+    two.map((g) => g.label).sort().join(',') === 'Jack M.,Jack R.');
+  ok('neither is flagged as a duplicate', duplicateGroups(two).length === 0);
+
+  // One child, two player records — what a copy-based import leaves behind.
+  const dupes = groupTeamsByPlayer([seminoles, fury], {
+    t1: [{ playerId: 'p1', firstName: 'Jack', lastName: 'Miller' }],
+    t2: [{ playerId: 'copy-of-p1', firstName: 'Jack', lastName: 'Miller' }],
+  });
+  ok('the two records are NOT merged', dupes.length === 2);
+  ok('both are flagged', duplicateGroups(dupes).length === 2);
+  ok('and say so', dupes[0].sublabel.includes('Two records'));
+
+  // The same child, ONE record, on two teams: one group, two teams. This is
+  // what an identity-preserving import produces.
+  const same = groupTeamsByPlayer([seminoles, fury], {
+    t1: [{ playerId: 'p1', firstName: 'Jack', lastName: 'Miller' }],
+    t2: [{ playerId: 'p1', firstName: 'Jack', lastName: 'Miller' }],
+  });
+  ok('one id is one group, however many teams', same.length === 1
+    && same[0].teams.length === 2);
+  ok('nothing is flagged', duplicateGroups(same).length === 0);
+  ok('and the label stays plain', same[0].label === 'Jack');
+
+  // A missing last name can't be disambiguated; it must not become "Jack ."
+  const noLast = groupTeamsByPlayer([seminoles, fury], {
+    t1: [{ playerId: 'p1', firstName: 'Jack' }],
+    t2: [{ playerId: 'p2', firstName: 'Jack', lastName: 'Rivera' }],
+  });
+  ok('a missing last name leaves the plain first name',
+    noLast.some((g) => g.label === 'Jack') && noLast.some((g) => g.label === 'Jack R.'));
+}
+
+console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed ? 1 : 0);

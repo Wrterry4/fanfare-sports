@@ -16,6 +16,19 @@
  *
  *   With one child and nothing else, grouping is noise. The caller can check
  *   `grouped.length === 1` and render a plain list instead.
+ *
+ * ── The label is not the identity ──────────────────────────────────────────
+ *
+ * Groups are keyed by playerId, always — that id is what career stats
+ * accumulate against and what a guardian link points at. The NAME is only how
+ * a group is labelled, and two groups can legitimately share one: siblings
+ * called J. on different teams, or two unrelated Jacks.
+ *
+ * So labels are disambiguated after the fact. Two Jacks become "Jack M." and
+ * "Jack R.". Two groups with the same full name are something else entirely —
+ * two player records for what is probably one child, which is a data problem
+ * rather than a display one — so they're flagged rather than silently merged.
+ * Merging them here would hide exactly the thing worth seeing.
  */
 
 export const UNLINKED_KEY = '__unlinked__';
@@ -42,6 +55,7 @@ export function groupTeamsByPlayer(teams, byTeam = {}, role = {}) {
           key,
           playerId: kid.playerId,
           label: kid.firstName || 'Your player',
+          lastName: kid.lastName || '',
           sublabel: null,
           teams: [],
         });
@@ -51,7 +65,8 @@ export function groupTeamsByPlayer(teams, byTeam = {}, role = {}) {
   }
 
   // Alphabetical by child, so the order doesn't shuffle when a team is added.
-  const out = [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
+  const out = disambiguate([...groups.values()]
+    .sort((a, b) => a.label.localeCompare(b.label)));
 
   if (unlinked.length) {
     // Named for what you actually do there. Someone keeping the book for a
@@ -69,6 +84,53 @@ export function groupTeamsByPlayer(teams, byTeam = {}, role = {}) {
 
   return out;
 }
+
+/**
+ * Make every label tell two children apart, and say so when it can't.
+ *
+ * Runs on the sorted list so the result is stable: adding a second Jack
+ * renames the first one too, which is correct — "Jack" stopped being enough
+ * the moment there were two.
+ */
+function disambiguate(groups) {
+  const byFirst = new Map();
+  for (const g of groups) {
+    if (!byFirst.has(g.label)) byFirst.set(g.label, []);
+    byFirst.get(g.label).push(g);
+  }
+
+  for (const [first, sharing] of byFirst) {
+    if (sharing.length < 2) continue;
+
+    for (const g of sharing) {
+      const initial = (g.lastName || '').trim().charAt(0).toUpperCase();
+      if (initial) g.label = `${first} ${initial}.`;
+    }
+
+    // Same first AND last name: two player records, one child. Almost always
+    // a player entered twice, or a roster copied instead of imported before
+    // identity was preserved.
+    const byFull = new Map();
+    for (const g of sharing) {
+      const full = `${first} ${(g.lastName || '').trim()}`.toLowerCase();
+      if (!byFull.has(full)) byFull.set(full, []);
+      byFull.get(full).push(g);
+    }
+    for (const dupes of byFull.values()) {
+      if (dupes.length < 2) continue;
+      for (const g of dupes) {
+        g.duplicateName = true;
+        g.sublabel = 'Two records for this name — see the note below';
+      }
+    }
+  }
+
+  return groups;
+}
+
+/** Groups that share a full name with another: one child, two player records. */
+export const duplicateGroups = (grouped) =>
+  (grouped || []).filter((g) => g.duplicateName);
 
 /**
  * True when grouping adds nothing — one child, or one group of any kind.
