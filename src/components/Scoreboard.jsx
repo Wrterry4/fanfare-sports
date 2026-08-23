@@ -54,21 +54,44 @@ function Pips({ label, filled, total, danger }) {
 function Scoreboard({ period, counters }) {
   if (!period) return null;
 
+  /**
+   * Two rows, not one.
+   *
+   * As a single row this ran about 180pt wide, which on a 375pt phone left the
+   * team name in the header with nowhere to go — it was being truncated to fit
+   * a count that was mostly empty space. Stacked it needs about 105pt, so the
+   * name gets roughly 75pt back, and two 14pt rows still sit inside the 58pt
+   * bar with room.
+   *
+   * The split is by update rate rather than by topic: balls and strikes change
+   * on nearly every pitch and go on top where the eye lands first; the period
+   * and outs change a few times an inning and sit underneath. A sport with a
+   * single counter (basketball's team fouls) simply renders one short row.
+   */
+  const fast = counters?.filter((c) => !c.danger) ?? [];
+  const slow = counters?.filter((c) => c.danger) ?? [];
+
   return (
     <View style={styles.bar}>
-      <View style={styles.half}>
-        <HalfArrow direction={period.direction} />
-        <Text style={styles.inning}>{period.label}</Text>
-      </View>
-
-      {counters?.length > 0 && (
-        <View style={styles.pips}>
-          {counters.map((c) => (
+      {fast.length > 0 && (
+        <View style={styles.row}>
+          {fast.map((c) => (
             <Pips key={c.key} label={c.label} filled={c.filled}
                   total={c.total} danger={c.danger} />
           ))}
         </View>
       )}
+
+      <View style={styles.row}>
+        <View style={styles.half}>
+          <HalfArrow direction={period.direction} />
+          <Text style={styles.inning}>{period.label}</Text>
+        </View>
+        {slow.map((c) => (
+          <Pips key={c.key} label={c.label} filled={c.filled}
+                total={c.total} danger={c.danger} />
+        ))}
+      </View>
     </View>
   );
 }
@@ -85,13 +108,14 @@ const styles = StyleSheet.create({
    * to be re-tuned for each.
    */
   bar: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
+    alignItems: 'flex-end', gap: 3,
     backgroundColor: 'rgba(11,17,32,0.88)',
-    paddingHorizontal: 10, paddingVertical: 5,
+    paddingHorizontal: 9, paddingVertical: 5,
     borderRadius: radius.md,
   },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   half: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  inning: { ...text.inning, color: '#FFF', fontSize: 14 },
+  inning: { ...text.inning, color: '#FFF', fontSize: 13 },
   pips: { flexDirection: 'row', gap: 9, alignItems: 'center' },
   pipSet: { flexDirection: 'row', gap: 4, alignItems: 'center' },
   pipDots: { flexDirection: 'row', gap: 3, alignItems: 'center' },

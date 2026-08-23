@@ -153,3 +153,56 @@ export function numberColor(primary, secondary) {
 
 /** The page background for a team, on its own — see the header for why a tint. */
 export const teamSurface = (team) => resolveTeamColor(team).surface;
+
+/**
+ * How far apart two fills must be to read as different bubbles.
+ *
+ * Not an accessibility threshold — nothing is being read ACROSS this pair.
+ * It's the point at which two blocks of colour beside each other are
+ * obviously two colours rather than one slightly uneven one. Navy against
+ * royal sits at about 1.6:1 and fails that; 2:1 is where it starts to work.
+ */
+const BUBBLE_SEPARATION = 2;
+
+/**
+ * Where your bubble goes when the team's two colours are too close.
+ *
+ * Two candidates, not one. A fixed dark fallback looked right until the
+ * primary was Black — then "their" bubble and the fallback were both near
+ * black and 1.01:1 apart, which is the exact failure the fallback exists to
+ * prevent. Whichever of these separates further from the primary wins, so a
+ * dark team gets a light bubble and a light team gets a dark one.
+ */
+const NEUTRAL_BUBBLES = [
+  { fill: '#0F172A', onFill: '#FFFFFF' },
+  { fill: '#E7EBF2', onFill: '#0F172A' },
+];
+
+/**
+ * Chat bubble colours: their messages in the primary, yours in the secondary.
+ *
+ * The one rule a chat cannot break is that the two sides must be tellable
+ * apart at a glance — that is the entire visual grammar of a conversation. A
+ * team can legitimately pick navy and royal, or leave the secondary unset so
+ * it falls back to the primary, and either way both sides would come out the
+ * same colour and the thread would become unreadable.
+ *
+ * So when the two are too close, YOUR bubble drops to the brand's navy — the
+ * colour it was before any of this — and their side keeps the team's primary.
+ * The team identity survives on the side that has more of the messages.
+ */
+export function bubbleColors(team) {
+  const resolved = team?.fill ? team : resolveTeamColor(team);
+  const theirs = { fill: resolved.fill, onFill: resolved.onFill };
+  const secondary = resolved.secondary || theirs;
+
+  if (contrastRatio(secondary.fill, theirs.fill) >= BUBBLE_SEPARATION) {
+    return { mine: { fill: secondary.fill, onFill: secondary.onFill }, theirs };
+  }
+
+  const fallback = NEUTRAL_BUBBLES
+    .slice()
+    .sort((a, b) => contrastRatio(b.fill, theirs.fill) - contrastRatio(a.fill, theirs.fill))[0];
+
+  return { mine: fallback, theirs };
+}

@@ -14,7 +14,7 @@ import {
 } from '../src/shared/contrast.js';
 import {
   TEAM_COLORS, DEFAULT_TEAM_COLOR, resolveTeamColor, isTeamColorId,
-  teamSurface, SURFACE_TINT,
+  teamSurface, SURFACE_TINT, bubbleColors,
 } from '../src/shared/teamColors.js';
 
 let passed = 0, failed = 0;
@@ -23,6 +23,9 @@ const ok = (label, cond) => {
   else { failed++; console.log(`  FAIL ${label}`); }
 };
 const group = (n) => console.log(`\n${n}`);
+
+/** Two bubbles closer than this read as one colour. See bubbleColors(). */
+const BUBBLE_MIN = 2;
 
 group('The WCAG math itself');
 {
@@ -236,6 +239,43 @@ group('Colors belong to the team, not the sport');
   ok('basketball resolves the same secondary', hoops.secondary.fill === ball.secondary.fill);
   ok('basketball gets the same surface tint', hoops.surface === ball.surface);
   ok('a sport that does not exist yet works too', future.surface === ball.surface);
+}
+
+group('Chat bubbles are always tellable apart');
+{
+  const two = bubbleColors({ colorId: 'navy', secondaryColorId: 'gold' });
+  ok('their messages take the primary', two.theirs.fill === '#1E3A8A');
+  ok('yours takes the secondary', two.mine.fill === '#F59E0B');
+  ok('each side keeps its own readable text colour',
+    contrastRatio(two.mine.onFill, two.mine.fill) >= MIN_AA
+    && contrastRatio(two.theirs.onFill, two.theirs.fill) >= MIN_AA);
+
+  // No secondary at all: both sides would be the primary and the thread
+  // would read as one colour.
+  const one = bubbleColors({ colorId: 'crimson' });
+  ok('with no secondary, your side falls back instead of matching',
+    one.mine.fill !== one.theirs.fill);
+  ok('and their side keeps the team colour', one.theirs.fill === '#B91C1C');
+
+  // Navy and royal are a real combination a team would choose.
+  const close = bubbleColors({ colorId: 'navy', secondaryColorId: 'royal' });
+  ok('two near-identical colours also fall back', close.mine.fill !== '#1D4ED8');
+
+  // The guarantee, across every pair in the palette.
+  let worst = Infinity;
+  let worstPair = '';
+  for (const a of TEAM_COLORS) {
+    for (const b of TEAM_COLORS) {
+      const { mine, theirs } = bubbleColors({ colorId: a.id, secondaryColorId: b.id });
+      const sep = contrastRatio(mine.fill, theirs.fill);
+      if (sep < worst) { worst = sep; worstPair = `${a.label}/${b.label}`; }
+    }
+  }
+  console.log(`       worst bubble separation ${worst.toFixed(2)}:1 (${worstPair})`);
+  ok('no combination in the palette produces two identical sides', worst >= BUBBLE_MIN);
+
+  ok('no team at all still gives two distinct bubbles',
+    bubbleColors(null).mine.fill !== bubbleColors(null).theirs.fill);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

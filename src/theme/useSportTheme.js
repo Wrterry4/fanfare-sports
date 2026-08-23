@@ -29,6 +29,8 @@ const FALLBACK = {
   fieldStroke: colors.navy,
   fieldFill: colors.card,
   occupied: colors.primary,
+  // Which shirt this sport's players wear — see components/Jersey.jsx.
+  jersey: 'baseball',
 };
 
 /**

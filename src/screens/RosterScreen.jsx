@@ -34,13 +34,17 @@ import PlayerCardScreen from './PlayerCardScreen.jsx';
 import { sportForTeam } from '../sports/registry.js';
 import { requestPlayerClaim, subscribeMyClaims } from '../services/membership.js';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
-import { useTeamSurface } from '../theme/useSportTheme.js';
+import { useTeamSurface, sportThemeOf } from '../theme/useSportTheme.js';
+import { resolveTeamColor } from '../shared/teamColors.js';
+import Jersey from '../components/Jersey.jsx';
 import { inputStyle } from '../theme/inputs.js';
 
 
 export default function RosterScreen() {
   const { team, game, allGames, roster, loading } = useGameDay();
   const surface = useTeamSurface();
+  const sportTheme = sportThemeOf(sportForTeam(team));
+  const teamColors = resolveTeamColor(team);
   const { isStaff, isFan } = useMyRole();
   const [tab, setTab] = useState('roster');
   const [adding, setAdding] = useState(false);
@@ -150,6 +154,8 @@ function RosterTab({ team, roster, adding, onDoneAdding }) {
             key={p.playerId}
             player={p}
             team={team}
+            sportTheme={sportTheme}
+            teamColors={teamColors}
             expanded={editingId === p.playerId}
             hasAudio={!!withAudio[p.playerId]}
             canEdit={isStaff}
@@ -246,7 +252,7 @@ function AddPlayerForm({ team, onDone }) {
 }
 
 /** Tapping a row expands it in place. */
-function PlayerRow({ player, team, expanded, hasAudio, canEdit, linked, pendingClaim,
+function PlayerRow({ player, team, sportTheme, teamColors, expanded, hasAudio, canEdit, linked, pendingClaim,
                      onClaim, onToggle, onWalkUp, onLink, onRemove, onStats }) {
   const positions = sportForTeam(team).POSITIONS || [];
   const [first, setFirst] = useState(player.firstName || '');
@@ -285,9 +291,14 @@ function PlayerRow({ player, team, expanded, hasAudio, canEdit, linked, pendingC
   return (
     <View style={[styles.card, expanded && styles.cardExpanded]}>
       <Pressable onPress={onToggle} style={styles.cardHead}>
-        <View style={styles.jersey}>
-          <Text style={styles.jerseyText}>{player.jerseyNumber ?? '–'}</Text>
-        </View>
+        {/* The same shirt the diamond and the batter card draw, so a number
+            means one person everywhere it appears. */}
+        <Jersey
+          kind={sportTheme.jersey}
+          colors={teamColors}
+          number={player.jerseyNumber ?? '–'}
+          size={40}
+        />
         <View style={styles.flex}>
           <Text style={styles.name}>{player.firstName} {player.lastName}</Text>
           <Text style={styles.meta}>

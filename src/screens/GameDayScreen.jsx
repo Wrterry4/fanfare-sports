@@ -21,6 +21,7 @@ import AppHeader from '../components/AppHeader.jsx';
 import AccountSheet from '../components/AccountSheet.jsx';
 import SoundboardSheet from '../components/SoundboardSheet.jsx';
 import AdvanceSheet from '../components/AdvanceSheet.jsx';
+import Jersey from '../components/Jersey.jsx';
 import MomentBanner from '../components/MomentBanner.jsx';
 import { findNewMoment } from '../shared/momentDetection.js';
 import { resolveTeamColor } from '../shared/teamColors.js';
@@ -490,6 +491,8 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
               <PersonCard
                 label={p.detail && isBatter ? p.detail : p.label}
                 jersey={person?.jerseyNumber}
+                jerseyKind={sportTheme.jersey}
+                jerseyColors={teamColors}
                 name={displayName}
                 detail={statLineFor(p)
                   ?? (p.detail
@@ -793,7 +796,7 @@ function ViewerPad({ state, describeFeed, emptyText }) {
  */
 function PersonCard({
   label, jersey, name, detail, accent, warn, onPlay, playing, onPress,
-  onIcon, iconGlyph, iconLabel, selected, showChevron,
+  onIcon, iconGlyph, iconLabel, selected, showChevron, jerseyKind, jerseyColors,
   // Sourced from the active sport's theme by the caller — this file has no
   // business knowing basketball's orange is basketball's orange.
   accentColor = colors.navy,
@@ -809,6 +812,7 @@ function PersonCard({
   const body = (
     <PersonBody {...{
       label, jersey, name, detail, accent, warn, onPlay, playing,
+      jerseyKind, jerseyColors,
       onIcon, iconGlyph, iconLabel, selected, showChevron: !!onPress && !!showChevron,
     }} />
   );
@@ -837,7 +841,7 @@ function PersonCard({
 /** Card contents, shared by the tappable and non-tappable forms. */
 function PersonBody({
   label, jersey, name, detail, accent, warn, onPlay, playing, showChevron,
-  onIcon, iconGlyph, iconLabel, selected,
+  onIcon, iconGlyph, iconLabel, selected, jerseyKind, jerseyColors,
 }) {
   return (
     <>
@@ -845,14 +849,15 @@ function PersonBody({
         {label}
       </Text>
       <View style={styles.personRow}>
-        <View style={[
-          styles.personJersey,
-          { backgroundColor: selected ? '#FFFFFF38' : accent },
-        ]}>
-          <Text style={[styles.personJerseyText, selected && styles.personJerseyTextSelected]}>
-            {jersey ?? '–'}
-          </Text>
-        </View>
+        {/* The shirt, not a coloured square with a number in it. Same glyph
+            the diamond draws, so the batter's card and the runner on second
+            are recognisably the same person. */}
+        <Jersey
+          kind={jerseyKind}
+          colors={jerseyColors}
+          number={jersey ?? '–'}
+          size={38}
+        />
         <View style={styles.flex}>
           <Text style={[styles.personName, selected && styles.personNameSelected]} numberOfLines={1}>
             {name}

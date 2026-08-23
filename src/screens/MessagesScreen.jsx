@@ -25,11 +25,13 @@ import AppHeader, { SegmentedTabs } from '../components/AppHeader.jsx';
 import AccountSheet from '../components/AccountSheet.jsx';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 import { useTeamSurface } from '../theme/useSportTheme.js';
+import { bubbleColors } from '../shared/teamColors.js';
 import { multilineStyle } from '../theme/inputs.js';
 
 export default function MessagesScreen() {
   const { team, loading } = useGameDay();
   const surface = useTeamSurface();
+  const bubbles = bubbleColors(team);
   const { user } = useAuth();
   const [tab, setTab] = useState('team');
   const [members, setMembers] = useState([]);
@@ -180,10 +182,22 @@ function MessageList({ messages, user, onSend, placeholder }) {
         {messages.length === 0 && <Text style={styles.empty}>No messages yet.</Text>}
         {messages.map((m) => {
           const mine = m.senderId === user?.uid;
+          // Their messages in the team primary, yours in the secondary. See
+          // bubbleColors() for what happens when a team picks two colours too
+          // close to tell apart.
+          const skin = mine ? bubbles.mine : bubbles.theirs;
           return (
-            <View key={m.id} style={[styles.bubble, mine && styles.mine]}>
-              {!mine && <Text style={styles.sender}>{m.senderName}</Text>}
-              <Text style={[styles.body, mine && styles.bodyMine]}>{m.text}</Text>
+            <View key={m.id} style={[
+              styles.bubble,
+              mine && styles.mineAlign,
+              { backgroundColor: skin.fill, borderColor: skin.fill },
+            ]}>
+              {!mine && (
+                <Text style={[styles.sender, { color: skin.onFill, opacity: 0.75 }]}>
+                  {m.senderName}
+                </Text>
+              )}
+              <Text style={[styles.body, { color: skin.onFill }]}>{m.text}</Text>
             </View>
           );
         })}
@@ -234,10 +248,11 @@ const styles = StyleSheet.create({
     borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm,
     alignSelf: 'flex-start', maxWidth: '86%',
   },
-  mine: { alignSelf: 'flex-end', backgroundColor: colors.navy, borderColor: colors.navy },
-  sender: { ...text.label, color: colors.pencil, marginBottom: 3 },
-  body: { ...text.body, fontSize: 15, color: colors.navy, lineHeight: 20 },
-  bodyMine: { color: '#FFF' },
+  mineAlign: { alignSelf: 'flex-end' },
+  // Colour comes from the bubble skin at the call site — both sides are now
+  // team colours, so a fixed navy or pencil here would fight them.
+  sender: { ...text.label, marginBottom: 3 },
+  body: { ...text.body, fontSize: 15, lineHeight: 20 },
   composer: {
     flexDirection: 'row', gap: spacing.sm, padding: spacing.md,
     borderTopWidth: 1, borderTopColor: colors.line, backgroundColor: colors.card,
