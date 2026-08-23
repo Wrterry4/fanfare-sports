@@ -57,6 +57,9 @@ const config = {
   storageBucket: process.env.EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_SENDER_ID,
   appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
+  // Analytics needs this and nothing else does. Absent, getAnalytics() is a
+  // no-op rather than an error — see services/monitoring.web.js.
+  measurementId: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID,
 };
 
 export const app = initializeApp(config);

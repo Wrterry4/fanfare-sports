@@ -23,7 +23,9 @@ import { photoStoragePath, extensionFor } from '../shared/photos.js';
 import { prefixedId } from '../shared/docIds.js';
 import { writePhotoDoc } from './photoShared.js';
 
-export { subscribePhotos, deletePhoto, postPhotoMessage } from './photoShared.js';
+export {
+  subscribePhotos, deletePhoto, postPhotoMessage, postGifMessage,
+} from './photoShared.js';
 
 export const photoPickingSupported = () =>
   typeof document !== 'undefined' && typeof FileReader !== 'undefined';

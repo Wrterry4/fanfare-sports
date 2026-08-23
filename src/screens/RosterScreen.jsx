@@ -32,7 +32,11 @@ import LinkParentSheet from '../components/LinkParentSheet.jsx';
 import ImportPlayersSheet from '../components/ImportPlayersSheet.jsx';
 import PlayerCardScreen from './PlayerCardScreen.jsx';
 import { sportForTeam } from '../sports/registry.js';
-import { requestPlayerClaim, subscribeMyClaims } from '../services/membership.js';
+import {
+  requestPlayerClaim, subscribeMyClaims, subscribeMembers, removeMembers,
+} from '../services/membership.js';
+import { departingMembers, departurePrompt, keptForSiblings }
+  from '../shared/departures.js';
 import ScreenRoot from '../components/ScreenRoot.jsx';
 import Centered from '../components/Centered.jsx';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
@@ -99,6 +103,7 @@ function RosterTab({ team, roster, formerPlayers = [], adding, onDoneAdding }) {
   const teamColors = resolveTeamColor(team);
   const { isStaff, linkedPlayerIds } = useMyRole();
   const [myClaims, setMyClaims] = useState([]);
+  const [members, setMembers] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [walkUp, setWalkUp] = useState(null);
   const [linkFor, setLinkFor] = useState(null);
@@ -115,6 +120,14 @@ function RosterTab({ team, roster, formerPlayers = [], adding, onDoneAdding }) {
   }, [roster.map((p) => p.playerId).join(',')]);
 
   useEffect(() => subscribeMyClaims(setMyClaims), []);
+
+  // Needed only when someone leaves, but a listener opened at that moment
+  // would have to be awaited inside a confirm dialog. One small subscription
+  // on a collection this screen is already about.
+  useEffect(() => {
+    if (!isStaff) return undefined;
+    return subscribeMembers(team.id, setMembers);
+  }, [team.id, isStaff]);
 
   const claimFor = useCallback((playerId) =>
     myClaims.find((c) => c.playerId === playerId && c.status === 'pending'),
@@ -134,6 +147,40 @@ function RosterTab({ team, roster, formerPlayers = [], adding, onDoneAdding }) {
       setWithAudio((w) => ({ ...w, [walkUp.playerId]: !!cfg }));
     } catch (e) { notify('Could not save', e.message); }
   }, [team.id, walkUp]);
+
+  /**
+   * The second question, asked only when there's someone to ask about.
+   *
+   * A kid who moved away and a kid who's out for the season look identical to
+   * the app and are completely different to their family — so the coach
+   * decides. A parent with another child still on the roster is never offered
+   * up; see shared/departures.js.
+   */
+  const offerToRemoveFamily = useCallback(async (p) => {
+    const departing = departingMembers(members, p.playerId);
+    const kept = keptForSiblings(members, p.playerId);
+
+    if (!departing.length) {
+      // Nobody to remove, but if a parent is staying because of a sibling,
+      // say so — a coach who expected the family to go would otherwise think
+      // this silently failed.
+      if (kept.length) {
+        notify('Removed from the roster',
+          `${kept.join(' and ')} stay${kept.length === 1 ? 's' : ''} on the team — `
+          + 'still linked to another player here.');
+      }
+      return;
+    }
+
+    const { title, message } = departurePrompt(p.firstName, departing);
+    const remove = await confirm({
+      title, message, confirmLabel: 'Remove them', destructive: true,
+    });
+    if (!remove) return;
+
+    const { failures } = await removeMembers(team.id, departing.map((d) => d.uid));
+    if (failures.length) notify('Some could not be removed', failures[0].message);
+  }, [members, team.id]);
 
   /**
    * Leaving, not deleting.
@@ -156,8 +203,10 @@ function RosterTab({ team, roster, formerPlayers = [], adding, onDoneAdding }) {
         active: false, leftAt: serverTimestamp(),
       });
       setEditingId(null);
+      await offerToRemoveFamily(p);
     } catch (e) { notify('Could not update', e.message); }
-  }, [team.id]);
+  }, [team.id, offerToRemoveFamily]);
+
 
   const bringBack = useCallback(async (p) => {
     try {

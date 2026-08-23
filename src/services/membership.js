@@ -20,7 +20,7 @@
  */
 
 import {
-  db, doc, collection, setDoc, getDoc, updateDoc, onSnapshot,
+  db, doc, collection, setDoc, getDoc, updateDoc, deleteDoc, onSnapshot,
   serverTimestamp, arrayUnion, arrayRemove, query, where,
 } from './firebase';
 import { call } from './callable.js';
@@ -90,6 +90,29 @@ export function linkPlayerToMember(teamId, memberUid, playerId) {
   return updateDoc(doc(db, 'teams', teamId, 'members', memberUid), {
     linkedPlayerIds: arrayUnion(playerId),
   });
+}
+
+/**
+ * Take someone off a team.
+ *
+ * Used when a player leaves and the coach says their family should go too. The
+ * member document is the membership — users/{uid}.teamIds is kept in step by a
+ * Cloud Function, so there is nothing else to write here, and a client that
+ * tried would be writing to another person's user document.
+ *
+ * One at a time and forgiving: removing three people should not fail as a unit
+ * because one of them already left.
+ */
+export async function removeMembers(teamId, uids) {
+  const failures = [];
+  for (const uid of uids || []) {
+    try {
+      await deleteDoc(doc(db, 'teams', teamId, 'members', uid));
+    } catch (e) {
+      failures.push({ uid, message: e?.message || 'Could not remove' });
+    }
+  }
+  return { failures };
 }
 
 export function unlinkPlayerFromMember(teamId, memberUid, playerId) {

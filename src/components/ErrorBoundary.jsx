@@ -11,6 +11,7 @@
 
 import React from 'react';
 import { View, Text, Pressable, ScrollView, StyleSheet, Platform } from 'react-native';
+import { reportError } from '../services/monitoring.js';
 import { colors, radius, spacing, text } from '../theme/tokens.js';
 
 export default class ErrorBoundary extends React.Component {
@@ -25,8 +26,14 @@ export default class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, info) {
     this.setState({ info });
-    // Keep it in the console too, for anyone who does have devtools open.
-    console.error('[Fanfare] render error:', error, info?.componentStack);
+    // A render error is the fatal kind: the screen is gone and the person is
+    // looking at this instead. reportError keeps it in the console too, for
+    // anyone who does have devtools open.
+    reportError(error, {
+      where: 'ErrorBoundary',
+      fatal: true,
+      componentStack: info?.componentStack?.slice(0, 300),
+    });
   }
 
   reload = () => {

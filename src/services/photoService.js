@@ -21,4 +21,6 @@ export async function uploadPhoto() {
   throw new Error('Adding photos is available on the web app for now.');
 }
 
-export { subscribePhotos, deletePhoto, postPhotoMessage } from './photoShared.js';
+export {
+  subscribePhotos, deletePhoto, postPhotoMessage, postGifMessage,
+} from './photoShared.js';

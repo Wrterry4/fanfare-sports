@@ -17,6 +17,7 @@ import { observeAuth, watchTokenRefresh, registerDevice } from '../services/auth
 import { resolvePendingInvite } from '../navigation/linking.js';
 import { redeemInvite, postRedeemDestination } from '../services/inviteService.js';
 import { completeRedirectSignIn } from '../services/socialAuth.js';
+import { startMonitoring, setMonitoringUser } from '../services/monitoring.js';
 
 const AuthContext = createContext(null);
 
@@ -34,6 +35,13 @@ export function AuthProvider({ children }) {
    */
   useEffect(() => { completeRedirectSignIn().catch(() => {}); }, []);
 
+  /**
+   * Crash reporting and performance traces, started before anything else can
+   * fail. Everything it does is optional at runtime — see monitoring.web.js —
+   * so this can't be what breaks a launch.
+   */
+  useEffect(() => { startMonitoring(); }, []);
+
   useEffect(() => {
     const unsub = observeAuth(async (u) => {
       setUser(u ?? null);
@@ -44,6 +52,9 @@ export function AuthProvider({ children }) {
       if (!u) { inviteHandled.current = false; return; }
 
       tokenWatcher.current = watchTokenRefresh(u.uid);
+      // One person's bad session reads as one thread rather than scattered
+      // anonymous events.
+      setMonitoringUser(u.uid);
 
       // Re-register silently when permission is already granted. FCM rotates
       // tokens, and a reinstall issues a new one — without this, notifications

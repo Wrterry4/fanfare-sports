@@ -193,6 +193,7 @@ function previewOf(msg) {
   const text = (msg.text || '').slice(0, 140);
   if (msg.kind === 'poll') return `📊 Poll · ${msg.poll?.question || text}`;
   if (msg.kind === 'photo') return '📷 Sent a photo';
+  if (msg.kind === 'gif') return '🎞️ Sent a GIF';
   return text;
 }
 

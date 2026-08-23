@@ -25,9 +25,11 @@ import AccountSheet from '../components/AccountSheet.jsx';
 import PollComposerSheet from '../components/PollComposerSheet.jsx';
 import PollBubble from '../components/PollBubble.jsx';
 import PhotoAlbumSheet from '../components/PhotoAlbumSheet.jsx';
+import GifPickerSheet from '../components/GifPickerSheet.jsx';
+import { isGiphyEnabled } from '../services/giphyService.js';
 import { postPoll } from '../services/pollService.js';
 import {
-  pickPhoto, uploadPhoto, photoPickingSupported, postPhotoMessage,
+  pickPhoto, uploadPhoto, photoPickingSupported, postPhotoMessage, postGifMessage,
 } from '../services/photoService.js';
 import { useMyRole } from '../hooks/useMyRole.js';
 import { notify } from '../utils/confirm.js';
@@ -207,6 +209,7 @@ function MessageList({ messages, user, onSend, placeholder, teamId, channel }) {
   const [draft, setDraft] = useState('');
   const [attaching, setAttaching] = useState(false);
   const [composingPoll, setComposingPoll] = useState(false);
+  const [pickingGif, setPickingGif] = useState(false);
   const [uploading, setUploading] = useState(false);
   const scroller = React.useRef(null);
   const inChannel = !!teamId && !!channel;
@@ -233,6 +236,14 @@ function MessageList({ messages, user, onSend, placeholder, teamId, channel }) {
     setUploading(false);
   }, [teamId, channel, user]);
 
+  /**
+   * A GIF is a URL on the message and nothing else — no upload, no photo
+   * document, no album tile. See services/giphyService.js.
+   */
+  const sendGif = useCallback(async (gif) => {
+    await postGifMessage({ teamId, channel, user, gif });
+  }, [teamId, channel, user]);
+
   const submit = async () => {
     const body = draft.trim();
     if (!body) return;
@@ -256,6 +267,19 @@ function MessageList({ messages, user, onSend, placeholder, teamId, channel }) {
             return (
               <PollBubble key={m.id} message={m} teamId={teamId} channel={channel}
                 user={user} canManage={mine || isStaff} />
+            );
+          }
+
+          if (m.kind === 'gif') {
+            return (
+              <View key={m.id} style={[styles.photoWrap, mine && styles.mineAlign]}>
+                {!mine && <Text style={styles.photoSender}>{m.senderName}</Text>}
+                <Image source={{ uri: m.gifUrl }}
+                  style={[styles.photo, {
+                    aspectRatio: m.width && m.height ? m.width / m.height : 4 / 3,
+                  }]}
+                  resizeMode="contain" />
+              </View>
             );
           }
 
@@ -306,16 +330,30 @@ function MessageList({ messages, user, onSend, placeholder, teamId, channel }) {
               </View>
             </Pressable>
           )}
-          {isStaff && (
-            <Pressable onPress={() => { setAttaching(false); setComposingPoll(true); }}
+          {isGiphyEnabled() && (
+            <Pressable onPress={() => { setAttaching(false); setPickingGif(true); }}
               style={styles.attachItem}>
-              <Text style={styles.attachIcon}>▤</Text>
+              <Text style={styles.attachIcon}>◐</Text>
               <View style={styles.flex}>
-                <Text style={styles.attachTitle}>Poll</Text>
-                <Text style={styles.attachSub}>Ask the team a question</Text>
+                <Text style={styles.attachTitle}>GIF</Text>
+                <Text style={styles.attachSub}>Search Giphy · stays out of the album</Text>
               </View>
             </Pressable>
           )}
+
+          {/* Open to everyone, not just staff. A team parent organising an
+              end-of-season lunch shouldn't have to route it through the coach
+              — and coaches can close or delete any poll, which is the tidy-up
+              path that makes open posting safe. Announcements stays staff-only
+              regardless: the rules enforce that, not this menu. */}
+          <Pressable onPress={() => { setAttaching(false); setComposingPoll(true); }}
+            style={styles.attachItem}>
+            <Text style={styles.attachIcon}>▤</Text>
+            <View style={styles.flex}>
+              <Text style={styles.attachTitle}>Poll</Text>
+              <Text style={styles.attachSub}>Ask the team a question</Text>
+            </View>
+          </Pressable>
         </View>
       )}
 
@@ -342,6 +380,12 @@ function MessageList({ messages, user, onSend, placeholder, teamId, channel }) {
         visible={composingPoll}
         onClose={() => setComposingPoll(false)}
         onPost={sendPoll}
+      />
+
+      <GifPickerSheet
+        visible={pickingGif}
+        onClose={() => setPickingGif(false)}
+        onPick={sendGif}
       />
     </KeyboardAvoidingView>
   );

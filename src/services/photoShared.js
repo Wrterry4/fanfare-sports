@@ -78,3 +78,28 @@ export function writePhotoDoc({ teamId, photoId, data }) {
 
 export const markPhotoMessage = ({ teamId, photoId, messageId, channel }) =>
   updateDoc(doc(db, 'teams', teamId, 'photos', photoId), { messageId, channel });
+
+/**
+ * A GIF message.
+ *
+ * No photo document and no Storage upload — see services/giphyService.js. The
+ * URL points at Giphy's CDN, which is why this can't reuse postPhotoMessage:
+ * that one writes `photoId`, and a GIF deliberately has none, which is exactly
+ * what keeps it out of the album.
+ */
+export function postGifMessage({ teamId, channel, user, gif }) {
+  return addDoc(
+    collection(db, 'teams', teamId, 'channels', channel, 'messages'),
+    {
+      kind: 'gif',
+      gifUrl: gif.url,
+      width: gif.width ?? null,
+      height: gif.height ?? null,
+      text: '🎞️ GIF',
+      senderId: user.uid,
+      senderName: user.displayName || 'Someone',
+      createdAt: serverTimestamp(),
+      deleted: false,
+    },
+  );
+}
