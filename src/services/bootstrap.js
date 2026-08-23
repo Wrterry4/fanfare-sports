@@ -181,7 +181,7 @@ export async function createPlayers(teamId, players) {
  */
 export async function importPlayers({ fromTeamId, toTeamId, players }) {
   const rows = (players || []).filter((p) => p?.playerId);
-  if (!rows.length) return { added: [], skipped: [], failures: [] };
+  if (!rows.length) return { added: [], skipped: [], failures: [], invited: 0 };
 
   if (!SPARK_MODE) {
     // The function re-checks staff on BOTH teams and is the only path that may
@@ -189,7 +189,9 @@ export async function importPlayers({ fromTeamId, toTeamId, players }) {
     const res = await httpsCallable(functions, 'importPlayers')({
       fromTeamId, toTeamId, playerIds: rows.map((p) => p.playerId),
     });
-    return { failures: [], ...(res.data || {}) };
+    // added / skipped / invited come from the function; failures is a
+    // Spark-only concept, since the function fails the whole call.
+    return { failures: [], invited: 0, ...(res.data || {}) };
   }
 
   // ── Spark mode ──────────────────────────────────────────────────────────
@@ -226,7 +228,10 @@ export async function importPlayers({ fromTeamId, toTeamId, players }) {
     }
   }
 
-  return { added, skipped, failures };
+  // No invites in Spark mode: creating one writes into another user's subtree,
+  // and no rule permits that from a client. Same line as invite redemption —
+  // parent onboarding genuinely requires Blaze.
+  return { added, skipped, failures, invited: 0 };
 }
 
 // ---------------------------------------------------------------------------

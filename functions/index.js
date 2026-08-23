@@ -26,6 +26,11 @@ import { db } from './firebase-init.js';
 // which meant a basketball game finalized with zero season stats written for
 // anybody — see serverDispatch.js for the full account.
 import { serverPackFor } from './shared/serverDispatch.js';
+import { teamInviteId, inviteWording, TEAM_INVITE_STATUS }
+  from './shared/common/teamInvites.js';
+// The one push helper that gets the web double-banner right and prunes dead
+// tokens. notifyGuardians below predates it.
+import { sendToUsers as pushToUsers } from './notifications.js';
 
 
 const hashCode = (code) =>
@@ -151,6 +156,7 @@ export const importPlayers = onCall(async (req) => {
 
   const added = [];
   const skipped = [];
+  let invited = 0;
 
   for (const playerId of ids) {
     // The id has to come off the source roster, not out of the request body —
@@ -184,11 +190,93 @@ export const importPlayers = onCall(async (req) => {
       rosteredTeamIds: FieldValue.arrayUnion(toTeamId),
     });
 
+    // Their parents already exist and are already linked to this child. See
+    // inviteGuardiansToTeam.
+    invited += await inviteGuardiansToTeam({
+      playerId, player, toTeamId, invitedBy: uid,
+    });
+
     added.push(playerId);
   }
 
-  return { added, skipped };
+  return { added, skipped, invited };
 });
+
+/**
+ * Ask a returning player's parents to join the new team.
+ *
+ * This is the half of an import that isn't about the coach. A child moved onto
+ * a fall roster is invisible to their own parents until those parents are
+ * members of that team — and nobody thinks to tell them, because from the
+ * coach's side the import already worked.
+ *
+ * Only existing guardians are contacted, and only about a child they are
+ * already attached to. It grants nothing on its own: the invite sits in their
+ * menu until they accept it, and accepting makes them a member, not a
+ * guardian — they were that already.
+ *
+ * @returns how many invites were created
+ */
+async function inviteGuardiansToTeam({ playerId, player, toTeamId, invitedBy }) {
+  const guardians = player.guardianUserIds || [];
+  if (!guardians.length) return 0;
+
+  const team = (await db.doc(`teams/${toTeamId}`).get()).data() || {};
+  const inviter = (await db.doc(`users/${invitedBy}`).get()).data() || {};
+  const words = inviteWording({
+    teamName: team.name,
+    season: team.season,
+    playerFirstName: player.firstName,
+  });
+
+  const recipients = [];
+  for (const guardianUid of guardians) {
+    // Already on the team — a parent with two kids on it, or one who joined
+    // ahead of the import. Inviting them to somewhere they already are is the
+    // fastest way to make these notifications worth ignoring.
+    const member = await db.doc(`teams/${toTeamId}/members/${guardianUid}`).get();
+    if (member.exists) continue;
+
+    const id = teamInviteId(toTeamId, playerId);
+    const ref = db.doc(`users/${guardianUid}/teamInvites/${id}`);
+
+    // Re-importing the same player must not stack up duplicate invites, and
+    // must not resurrect one they already declined.
+    const prior = await ref.get();
+    if (prior.exists && prior.data()?.status !== TEAM_INVITE_STATUS.PENDING) continue;
+
+    await ref.set({
+      teamId: toTeamId,
+      teamName: team.name || null,
+      season: team.season || null,
+      playerId,
+      playerFirstName: player.firstName || null,
+      playerLastName: player.lastName || null,
+      role: 'parent',
+      invitedBy,
+      invitedByName: inviter.displayName || null,
+      source: 'import',
+      status: TEAM_INVITE_STATUS.PENDING,
+      createdAt: FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    recipients.push(guardianUid);
+  }
+
+  if (recipients.length) {
+    // Not gated on a notification preference: those are per-TEAM settings on a
+    // member document, and the whole point of this message is that the person
+    // isn't a member of this team yet. There is nowhere for them to have said
+    // no, and one invite per child per team is not a stream.
+    await pushToUsers(recipients, {
+      title: words.title,
+      body: words.body,
+      data: { type: 'teamInvite', teamId: toTeamId, playerId },
+    });
+  }
+
+  return recipients.length;
+}
 
 /**
  * A coach enters a career code to bring an existing player onto their roster.
@@ -717,3 +805,4 @@ export {
   createPlayerInvites, createFanInvite, createTeamInvite,
   revokeInvite, previewInvite, redeemInvite, invitePipeline,
 } from './invites.js';
+export { respondToTeamInvite } from './teamInvites.js';

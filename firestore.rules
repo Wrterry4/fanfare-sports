@@ -84,6 +84,22 @@ service cloud.firestore {
                     && !request.resource.data.diff(resource.data).affectedKeys()
                          .hasAny(['guardianOf']);
       allow delete: if false;
+
+      /**
+       * Invitations addressed to THIS person — a coach imported their child
+       * onto another team and is asking them to join it.
+       *
+       * Read-only to the person they belong to. Answering one writes a
+       * membership document, which no client rule may do on its own behalf, so
+       * respondToTeamInvite() owns every write here. Living under the
+       * invitee's own subtree is also what makes the invite unforwardable:
+       * there is no token to leak, and no other account can see the document
+       * at all.
+       */
+      match /teamInvites/{inviteId} {
+        allow read:  if signedIn() && uid() == userId;
+        allow write: if false;
+      }
     }
 
     // ---- players (root) --------------------------------------------------

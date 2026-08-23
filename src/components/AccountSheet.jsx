@@ -5,6 +5,11 @@
  * at. Team *settings* stay on the Settings tab, because those belong to the
  * team rather than to you.
  *
+ * Invitations sit ABOVE everything else, including your own details. They're
+ * the only thing in here waiting on an answer — a name and a phone number will
+ * still be there tomorrow, and a parent who can't see their kid's new team
+ * won't wait until tomorrow to go looking for it.
+ *
  * Slides from the left, which is where the button is.
  */
 
@@ -18,6 +23,9 @@ import { db, doc, getDoc, setDoc, updateDoc, deleteDoc } from '../services/fireb
 import { useAuth } from '../hooks/AuthProvider.jsx';
 import { useActiveTeam } from '../hooks/ActiveTeam.jsx';
 import { useMyTeamPlayers } from '../hooks/useMyTeamPlayers.js';
+import { useTeamInvites } from '../hooks/useTeamInvites.js';
+import { respondToTeamInvite } from '../services/teamInvites.js';
+import { inviteWording } from '../shared/teamInvites.js';
 import { groupTeamsByPlayer, groupingIsUseful } from '../shared/teamGrouping.js';
 import NewTeamSheet from './NewTeamSheet.jsx';
 import { signOut } from '../services/authService.js';
@@ -35,6 +43,8 @@ export default function AccountSheet({ visible, onClose }) {
   const [renaming, setRenaming] = useState(null);
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [answering, setAnswering] = useState(null);
+  const { invites } = useTeamInvites();
   // Role comes from the same member document as the linked players, so the
   // unlinked group can be labelled honestly.
   const { byTeam, roleByTeam } = useMyTeamPlayers(teams);
@@ -102,6 +112,25 @@ export default function AccountSheet({ visible, onClose }) {
     } catch (e) { notify('Could not update', e.message); }
   }, [user?.uid]);
 
+  /**
+   * Accepting switches you straight to the team. Landing back on the menu
+   * having "joined" with nothing visibly different is the moment a parent
+   * decides the app didn't work.
+   */
+  const answerInvite = useCallback(async (invite, accept) => {
+    setAnswering(invite.id);
+    try {
+      await respondToTeamInvite(invite.id, accept);
+      if (accept) {
+        // isNew: the id won't be in the teams list until users/{uid}.teamIds
+        // comes back, and ActiveTeam would otherwise bounce the selection.
+        select(invite.teamId, { isNew: true });
+        onClose();
+      }
+    } catch (e) { notify('Could not respond', e.message); }
+    setAnswering(null);
+  }, [select, onClose]);
+
   const doSignOut = useCallback(async () => {
     const ok = await confirm({ title: 'Sign out?', confirmLabel: 'Sign out', destructive: true });
     if (ok) { onClose(); signOut(); }
@@ -121,6 +150,40 @@ export default function AccountSheet({ visible, onClose }) {
                   <Text style={styles.close}>✕</Text>
                 </Pressable>
               </View>
+
+              {invites.length > 0 && (
+                <View style={styles.inviteBlock}>
+                  <Text style={[styles.sectionLabel, styles.inviteLabel]}>
+                    TEAM INVITES · {invites.length}
+                  </Text>
+                  {invites.map((inv) => {
+                    const words = inviteWording(inv);
+                    return (
+                      <View key={inv.id} style={styles.inviteRow}>
+                        <Text style={styles.inviteTeam}>{words.rowTitle}</Text>
+                        <Text style={styles.inviteSub}>{words.rowSub}</Text>
+                        {inv.invitedByName ? (
+                          <Text style={styles.inviteSub}>Invited by {inv.invitedByName}</Text>
+                        ) : null}
+                        {answering === inv.id ? (
+                          <ActivityIndicator color={colors.primary} style={styles.inviteBusy} />
+                        ) : (
+                          <View style={styles.inviteBtns}>
+                            <Pressable onPress={() => answerInvite(inv, false)}
+                              style={[styles.tinyGhost, styles.flex]}>
+                              <Text style={styles.tinyGhostText}>NO THANKS</Text>
+                            </Pressable>
+                            <Pressable onPress={() => answerInvite(inv, true)}
+                              style={[styles.tiny, styles.flex]}>
+                              <Text style={styles.tinyText}>JOIN TEAM</Text>
+                            </Pressable>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
 
               <Text style={styles.sectionLabel}>YOUR DETAILS</Text>
               <Text style={styles.label}>Name</Text>
@@ -279,6 +342,16 @@ const styles = StyleSheet.create({
   headTitle: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 21, color: colors.navy },
   close: { fontSize: 20, color: colors.pencil, paddingHorizontal: 4 },
   sectionLabel: { ...text.label, color: colors.pencil, marginBottom: spacing.md },
+  inviteBlock: { marginBottom: spacing.xl },
+  inviteLabel: { color: colors.primary, marginBottom: spacing.sm },
+  inviteRow: {
+    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.primary,
+    borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm,
+  },
+  inviteTeam: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 15, color: colors.navy },
+  inviteSub: { ...text.body, fontSize: 11.5, color: colors.pencil, marginTop: 2, lineHeight: 16 },
+  inviteBtns: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  inviteBusy: { marginTop: spacing.md, alignSelf: 'flex-start' },
   label: { ...text.label, color: colors.pencil, marginBottom: 5 },
   readonly: { justifyContent: 'center', backgroundColor: '#F1F3F7' },
   readonlyText: { ...text.body, fontSize: 15, color: colors.pencil },
@@ -309,9 +382,9 @@ const styles = StyleSheet.create({
   teamActions: { alignItems: 'flex-end', gap: 6 },
   teamAction: { ...text.label, fontSize: 8.5, color: colors.pencil },
   renameBtns: { flexDirection: 'row', gap: 6, marginTop: 6, justifyContent: 'flex-end' },
-  tiny: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.sm, backgroundColor: colors.navy },
+  tiny: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.sm, backgroundColor: colors.navy, alignItems: 'center' },
   tinyText: { ...text.buttonSecondary, fontSize: 9.5, color: '#FFF' },
-  tinyGhost: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.line },
+  tinyGhost: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.line, alignItems: 'center' },
   tinyGhostText: { ...text.buttonSecondary, fontSize: 9.5, color: colors.pencil },
   teamNameOn: { color: colors.primary },
   teamMeta: { ...text.body, fontSize: 11.5, color: colors.pencil, marginTop: 2 },

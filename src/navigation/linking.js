@@ -159,6 +159,13 @@ export function notificationToPath(data = {}) {
     case 'gameStart':
     case 'finalScore':
       return `/teams/${teamId}/games/${gameId}`;
+    // An invite is answered in the account menu, and the menu isn't a route —
+    // it's a sheet over whatever tab you're on. Returning null lets the app
+    // open where it was; the badge on the hamburger is what carries it from
+    // there. Routing to the team itself would be worse: you aren't a member
+    // of it yet, which is the whole reason you were asked.
+    case 'teamInvite':
+      return null;
     default:
       return null;
   }

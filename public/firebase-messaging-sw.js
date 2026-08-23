@@ -50,7 +50,11 @@ messaging.onBackgroundMessage((payload) => {
     badge: '/icons/badge-72.png',
     // Same tag replaces rather than stacks: a parent who steps away shouldn't
     // return to eleven separate "Jack is up" notifications.
-    tag: data.type === 'atBat' ? `atbat-${data.playerId}` : data.type,
+    // A team invite is per child: two kids moved onto the same team is two
+    // separate asks, and tagging both 'teamInvite' would show only the second.
+    tag: data.type === 'atBat' ? `atbat-${data.playerId}`
+       : data.type === 'teamInvite' ? `invite-${data.teamId}-${data.playerId}`
+       : data.type,
     renotify: true,
     data,
   });

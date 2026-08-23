@@ -39,7 +39,7 @@ import { db } from './firebase-init.js';
  * @param uids      recipients (already filtered by preference)
  * @param payload   { title, body, data }
  */
-async function sendToUsers(uids, { title, body, data = {} }) {
+export async function sendToUsers(uids, { title, body, data = {} }) {
   const unique = [...new Set(uids)].filter(Boolean);
   if (!unique.length) return;
 

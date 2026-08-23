@@ -14,6 +14,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 import { colors, radius, spacing, text } from '../theme/tokens.js';
 import { resolveTeamColor } from '../shared/teamColors.js';
+import { useTeamInvites } from '../hooks/useTeamInvites.js';
 
 export const HEADER_HEIGHT = 58;
 
@@ -33,6 +34,14 @@ function Hamburger({ color = '#FFF' }) {
  */
 function AppHeader({ team, onMenu, right, onBack, centerTitle }) {
   const teamColor = resolveTeamColor(team);
+  /**
+   * Read here rather than passed down from five screens.
+   *
+   * An invite is account-level and the menu is on every tab, so threading a
+   * count through each screen would be five places to forget. One listener on
+   * one small collection, mounted wherever the button it marks is.
+   */
+  const { count: menuBadge } = useTeamInvites();
 
   /**
    * The bar itself takes the team's color.
@@ -63,8 +72,15 @@ function AppHeader({ team, onMenu, right, onBack, centerTitle }) {
           </Pressable>
         ) : (
           <Pressable onPress={onMenu} style={styles.iconBtn} hitSlop={10}
-            accessibilityRole="button" accessibilityLabel="Account menu">
+            accessibilityRole="button"
+            accessibilityLabel={menuBadge > 0
+              ? `Account menu, ${menuBadge} invite${menuBadge === 1 ? '' : 's'} waiting`
+              : 'Account menu'}>
             <Hamburger color={fg} />
+            {/* An invitation is the one thing in the menu that expires and is
+                addressed to you. Without a mark on the button, the only way to
+                find it is to already know it's there. */}
+            {menuBadge > 0 && <View style={[styles.badge, { borderColor: bg }]} />}
           </Pressable>
         )}
 
@@ -138,6 +154,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md, gap: spacing.sm,
   },
   iconBtn: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  // Borderless would vanish on a gold or white team colour; the ring is the
+  // bar's own colour, so the dot reads on all 22 of them.
+  badge: {
+    position: 'absolute', top: 5, right: 4, width: 10, height: 10,
+    borderRadius: 5, backgroundColor: colors.out, borderWidth: 1.5,
+  },
   back: { fontSize: 30, color: '#FFF', marginTop: -4 },
   titles: { flex: 1, justifyContent: 'center' },
   name: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 18, color: '#FFF' },

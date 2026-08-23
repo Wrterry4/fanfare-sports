@@ -19,7 +19,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { db, doc, updateDoc, deleteDoc } from '../services/firebase';
+import { db, doc, updateDoc, deleteDoc, serverTimestamp } from '../services/firebase';
 import { useGameDay } from '../hooks/useGameDay.js';
 import { createPlayer } from '../services/bootstrap.js';
 import { confirm, notify } from '../utils/confirm.js';
@@ -39,10 +39,11 @@ import { useTeamSurface, sportThemeOf } from '../theme/useSportTheme.js';
 import { resolveTeamColor } from '../shared/teamColors.js';
 import Jersey from '../components/Jersey.jsx';
 import { inputStyle } from '../theme/inputs.js';
+import { leftLabel } from '../shared/rosterStatus.js';
 
 
 export default function RosterScreen() {
-  const { team, game, allGames, roster, loading } = useGameDay();
+  const { team, game, allGames, roster, formerPlayers, loading } = useGameDay();
   const surface = useTeamSurface();
   const { isStaff, isFan } = useMyRole();
   const [tab, setTab] = useState('roster');
@@ -80,7 +81,8 @@ export default function RosterScreen() {
       <AccountSheet visible={menu} onClose={() => setMenu(false)} />
 
       {tab === 'roster' || isFan
-        ? <RosterTab team={team} roster={roster} adding={adding} onDoneAdding={() => setAdding(false)} />
+        ? <RosterTab team={team} roster={roster} formerPlayers={formerPlayers}
+                     adding={adding} onDoneAdding={() => setAdding(false)} />
         : <LineupTab team={team} games={allGames} currentGame={game} roster={roster} />}
     </SafeAreaView>
   );
@@ -88,7 +90,7 @@ export default function RosterScreen() {
 
 // ---------------------------------------------------------------------------
 
-function RosterTab({ team, roster, adding, onDoneAdding }) {
+function RosterTab({ team, roster, formerPlayers = [], adding, onDoneAdding }) {
   // Resolved here rather than in RosterScreen: this is the component that
   // renders the rows, and the shirt needs both the sport's silhouette and the
   // team's colours.
@@ -132,17 +134,57 @@ function RosterTab({ team, roster, adding, onDoneAdding }) {
     } catch (e) { notify('Could not save', e.message); }
   }, [team.id, walkUp]);
 
-  const remove = useCallback(async (p) => {
+  /**
+   * Leaving, not deleting.
+   *
+   * Deleting the roster entry took the player's NAME with it — it's the only
+   * copy the whole team can read — so every box score they appeared in fell
+   * back to a raw id. They come off every current-squad list and stay in the
+   * record. See shared/rosterStatus.js.
+   */
+  const leave = useCallback(async (p) => {
     const ok = await confirm({
-      title: `Remove ${p.firstName}?`,
-      message: 'Takes them off this roster. Their stats and history are kept.',
-      confirmLabel: 'Remove', destructive: true,
+      title: `${p.firstName} left the team?`,
+      message: 'They come off the roster and lineups. Their games, stats and '
+             + 'name stay in the record, and you can bring them back.',
+      confirmLabel: 'They left', destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await updateDoc(doc(db, 'teams', team.id, 'roster', p.playerId), {
+        active: false, leftAt: serverTimestamp(),
+      });
+      setEditingId(null);
+    } catch (e) { notify('Could not update', e.message); }
+  }, [team.id]);
+
+  const bringBack = useCallback(async (p) => {
+    try {
+      // The number is deliberately not restored — someone else is probably
+      // wearing it by now.
+      await updateDoc(doc(db, 'teams', team.id, 'roster', p.playerId), {
+        active: true, leftAt: null,
+      });
+    } catch (e) { notify('Could not update', e.message); }
+  }, [team.id]);
+
+  /**
+   * The escape hatch for a player added by mistake, and only reachable from
+   * the former-players list. A wrong name typed this morning shouldn't be
+   * preserved for the record forever — but a real player must never be one
+   * tap from erasure, which is why it isn't offered on the squad itself.
+   */
+  const deleteForever = useCallback(async (p) => {
+    const ok = await confirm({
+      title: `Delete ${p.firstName} ${p.lastName || ''}`.trim() + '?',
+      message: "For a player added by mistake. Their name comes out of every "
+             + 'game they appear in. Their own record and career stats are kept.',
+      confirmLabel: 'Delete', destructive: true,
     });
     if (!ok) return;
     try {
       await deleteDoc(doc(db, 'teams', team.id, 'roster', p.playerId));
-      setEditingId(null);
-    } catch (e) { notify('Could not remove', e.message); }
+    } catch (e) { notify('Could not delete', e.message); }
   }, [team.id]);
 
   return (
@@ -188,9 +230,43 @@ function RosterTab({ team, roster, adding, onDoneAdding }) {
             onToggle={() => setEditingId(editingId === p.playerId ? null : p.playerId)}
             onWalkUp={() => setWalkUp(p)}
             onLink={() => setLinkFor(p)}
-            onRemove={() => remove(p)}
+            onRemove={() => leave(p)}
           />
         ))}
+        {formerPlayers.length > 0 && (
+          <View style={styles.formerBlock}>
+            <Text style={styles.formerHead}>
+              LEFT THE TEAM · {formerPlayers.length}
+            </Text>
+            {formerPlayers.map((p) => (
+              <View key={p.playerId} style={[styles.card, styles.formerRow]}>
+                <View style={styles.flex}>
+                  <Text style={styles.formerName}>
+                    {p.firstName} {p.lastName}
+                  </Text>
+                  <Text style={styles.meta}>{leftLabel(p)}</Text>
+                </View>
+                {/* Their stats are still worth reading — that's the point of
+                    keeping them. */}
+                <Pressable onPress={() => setCardFor(p)} style={styles.iconBtn} hitSlop={6}
+                           accessibilityRole="button"
+                           accessibilityLabel={`${p.firstName}'s stats`}>
+                  <Text style={styles.iconBtnText}>📊</Text>
+                </Pressable>
+                {isStaff && (
+                  <>
+                    <Pressable onPress={() => bringBack(p)} style={styles.iconBtn} hitSlop={6}>
+                      <Text style={styles.iconBtnText}>BACK</Text>
+                    </Pressable>
+                    <Pressable onPress={() => deleteForever(p)} style={styles.iconBtn} hitSlop={6}>
+                      <Text style={[styles.iconBtnText, { color: colors.out }]}>DELETE</Text>
+                    </Pressable>
+                  </>
+                )}
+              </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
 
       <PlayerCardScreen
@@ -398,7 +474,7 @@ function PlayerRow({ player, team, sportTheme, teamColors, expanded, hasAudio, c
 
           <View style={styles.formBtns}>
             <Pressable onPress={onRemove} style={[styles.cta, styles.ctaGhost]}>
-              <Text style={[styles.ctaText, { color: colors.out }]}>REMOVE</Text>
+              <Text style={[styles.ctaText, { color: colors.out }]}>LEFT TEAM</Text>
             </Pressable>
             <Pressable onPress={save} disabled={busy} style={[styles.cta, styles.flex]}>
               {busy ? <ActivityIndicator color="#FFF" /> : <Text style={styles.ctaText}>SAVE</Text>}
@@ -661,6 +737,10 @@ const styles = StyleSheet.create({
   iconBtnTextOn: { color: colors.navy, fontSize: 14 },
   chev: { fontSize: 16, color: colors.pencil, paddingHorizontal: 4 },
   importBtn: { borderColor: colors.primary, marginBottom: spacing.md },
+  formerBlock: { marginTop: spacing.xl },
+  formerHead: { ...text.label, color: colors.pencil, marginBottom: spacing.sm },
+  formerRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, padding: spacing.md, opacity: 0.7 },
+  formerName: { fontFamily: 'Archivo', fontWeight: '700', fontSize: 15, color: colors.pencil },
   empty: { ...text.body, color: colors.pencil, textAlign: 'center', paddingVertical: 30 },
   msg: { ...text.body, color: colors.pencil, textAlign: 'center' },
   lineupHint: { ...text.body, fontSize: 12.5, color: colors.pencil, marginBottom: spacing.md, lineHeight: 18 },

@@ -5,13 +5,14 @@
  * WHICH of its players. Collapsing them into one long list of every player on
  * every team you coach reads fine with two teams and not at all with five.
  *
- * The team step is skipped when there's exactly one other team to import from,
- * which is the common case — a coach with a spring team starting a fall one.
+ * Picks accumulate across teams, so a coach merging a spring and a summer
+ * roster does it in one pass. The team step is skipped when there's only one
+ * other team to import from, which is the common case.
  *
- * All the selection rules live in shared/rosterImport.js; this file is the
- * screen around them — including the two things worth saying out loud on the
- * screen itself: an imported player is the SAME player (career and parent
- * links intact), and their number does not come with them.
+ * Two things are worth saying on the screen itself, because both contradict
+ * what "import" sounds like: an imported player is the SAME player — career
+ * and parent links intact — and their number does not come with them. All the
+ * rules live in shared/rosterImport.js; this file is the screen around them.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -23,7 +24,8 @@ import { db, collection, getDocs } from '../services/firebase';
 import { importPlayers } from '../services/bootstrap.js';
 import { notify } from '../utils/confirm.js';
 import {
-  importSourceTeams, buildImportRows, defaultSelection, importSelection, importSummary,
+  importSourceTeams, buildImportRows, defaultSelection, importsBySource,
+  importSummary, rowState, rowIsLocked, ROW_STATE,
 } from '../shared/rosterImport.js';
 import { useActiveTeam } from '../hooks/ActiveTeam.jsx';
 import { useMyTeamPlayers } from '../hooks/useMyTeamPlayers.js';
@@ -31,8 +33,8 @@ import { colors, radius, spacing, text } from '../theme/tokens.js';
 
 export default function ImportPlayersSheet({ visible, team, roster, onClose, onImported }) {
   const { teams } = useActiveTeam();
-  // Role per team comes from the member document, and only staff teams may be
-  // copied from — see the header of rosterImport.js.
+  // Role per team comes from the member document, and only teams you're staff
+  // on may be imported from — see the header of rosterImport.js.
   const { roleByTeam } = useMyTeamPlayers(teams);
 
   const sources = useMemo(
@@ -40,76 +42,111 @@ export default function ImportPlayersSheet({ visible, team, roster, onClose, onI
     [teams, roleByTeam, team?.id]);
 
   const [sourceId, setSourceId] = useState(null);
-  const [rows, setRows] = useState(null);          // null = still loading
-  const [selected, setSelected] = useState([]);
+  // { [sourceTeamId]: rows }, kept so switching back to a team you've already
+  // looked at doesn't re-read it or lose what you ticked there.
+  const [rowsBySource, setRowsBySource] = useState({});
+  // { [playerId]: sourceTeamId } — every pick, across every team.
+  const [picked, setPicked] = useState({});
+  const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const rows = sourceId ? rowsBySource[sourceId] : null;
+  const source = sources.find((t) => t.id === sourceId) || null;
+  const pickedCount = Object.keys(picked).length;
 
   // One team to choose from is not a choice worth making someone make.
   useEffect(() => {
-    if (!visible) { setSourceId(null); setRows(null); setSelected([]); return; }
-    if (sources.length === 1) setSourceId(sources[0].id);
-  }, [visible, sources.length]);
+    if (sources.length === 1 && !sourceId) setSourceId(sources[0].id);
+  }, [sources.length, sourceId]);
 
-  // The source roster is read once, on selection. It isn't live data to us —
-  // we're taking a copy of it at this moment by definition.
+  // A source roster is read once and kept. It isn't live data to us — we're
+  // taking a copy of it at this moment by definition.
   useEffect(() => {
-    if (!visible || !sourceId) { setRows(null); return undefined; }
+    if (!sourceId || rowsBySource[sourceId]) return undefined;
     let cancelled = false;
-    setRows(null);
+    setLoading(true);
 
     getDocs(collection(db, 'teams', sourceId, 'roster'))
       .then((snap) => {
         if (cancelled) return;
-        const source = snap.docs.map((d) => ({ playerId: d.id, ...d.data() }));
-        const next = buildImportRows(source, roster || []);
-        setRows(next);
-        setSelected(defaultSelection(next));
+        const from = snap.docs.map((d) => ({ playerId: d.id, ...d.data() }));
+        const next = buildImportRows(from, roster || []);
+        setRowsBySource((m) => ({ ...m, [sourceId]: next }));
+        // Everyone not already accounted for starts ticked.
+        setPicked((p) => {
+          const out = { ...p };
+          for (const id of defaultSelection(next)) if (!out[id]) out[id] = sourceId;
+          return out;
+        });
+        setLoading(false);
       })
       .catch((e) => {
         if (cancelled) return;
-        setRows([]);
+        setRowsBySource((m) => ({ ...m, [sourceId]: [] }));
+        setLoading(false);
         notify('Could not load that roster', e.message);
       });
 
     return () => { cancelled = true; };
-  }, [visible, sourceId]);
+  }, [sourceId]);
 
   const toggle = useCallback((playerId) => {
-    setSelected((s) => s.includes(playerId)
-      ? s.filter((id) => id !== playerId)
-      : [...s, playerId]);
-  }, []);
+    setPicked((p) => {
+      const out = { ...p };
+      if (out[playerId]) delete out[playerId];
+      else out[playerId] = sourceId;
+      return out;
+    });
+  }, [sourceId]);
 
-  // "All" means everyone importable — players already on this roster can't be
-  // selected, so counting them would leave the button permanently half-on.
+  // "All" means everyone this team can still contribute — players already on
+  // the destination, or already picked from another team, aren't choices.
   const selectable = useMemo(
-    () => (rows || []).filter((r) => !r.alreadyOnRoster), [rows]);
-  const allOn = !!selectable.length && selected.length === selectable.length;
+    () => (rows || []).filter((r) => !rowIsLocked(rowState(r, picked, sourceId))),
+    [rows, picked, sourceId]);
+  const fromThisTeam = useMemo(
+    () => selectable.filter((r) => picked[r.playerId]).length, [selectable, picked]);
+  const allOn = !!selectable.length && fromThisTeam === selectable.length;
+
   const toggleAll = useCallback(() => {
-    setSelected(allOn ? [] : selectable.map((r) => r.playerId));
-  }, [allOn, selectable]);
+    setPicked((p) => {
+      const out = { ...p };
+      for (const r of selectable) {
+        if (allOn) delete out[r.playerId];
+        else out[r.playerId] = sourceId;
+      }
+      return out;
+    });
+  }, [allOn, selectable, sourceId]);
 
   const runImport = useCallback(async () => {
-    const players = importSelection(rows, selected);
-    if (!players.length) { notify('Pick at least one player.'); return; }
+    const batches = importsBySource(picked, rowsBySource);
+    if (!batches.length) { notify('Pick at least one player.'); return; }
     setBusy(true);
+
+    // One call per source team: the function checks staff on the team it's
+    // reading from, so the batches can't be merged.
+    let added = 0, failed = 0, invited = 0;
     try {
-      const { added, failures = [] } = await importPlayers({
-        fromTeamId: sourceId, toTeamId: team.id, players,
-      });
+      for (const batch of batches) {
+        const res = await importPlayers({
+          fromTeamId: batch.fromTeamId, toTeamId: team.id, players: batch.players,
+        });
+        added += (res.added || []).length;
+        failed += (res.failures || []).length;
+        invited += res.invited || 0;
+      }
       notify(
-        failures.length ? 'Imported with problems' : 'Players imported',
-        importSummary({ added: added.length, failed: failures.length }),
+        failed ? 'Imported with problems' : 'Players imported',
+        importSummary({ added, failed, invited }),
       );
       onImported?.(added);
       onClose?.();
     } catch (e) { notify('Could not import', e.message); }
     setBusy(false);
-  }, [rows, selected, sourceId, team?.id, onImported, onClose]);
+  }, [picked, rowsBySource, team?.id, onImported, onClose]);
 
   if (!visible) return null;
-
-  const source = sources.find((t) => t.id === sourceId) || null;
 
   return (
     <Modal visible transparent animationType="slide" onRequestClose={onClose}>
@@ -121,9 +158,11 @@ export default function ImportPlayersSheet({ visible, team, roster, onClose, onI
         </Text>
         <Text style={styles.sub}>
           {source
-            ? "Everyone's checked. Uncheck anyone who isn't on this team. They keep "
-              + 'their stats and parent links; give them numbers on the roster.'
-            : 'Pick the team to import players from. You choose who comes over next.'}
+            ? "Everyone's checked. Uncheck anyone who isn't on this team — they "
+              + 'keep their stats and their parents, and their families are '
+              + 'invited to join.'
+            : 'Pick a team to import players from. You can come back and pick '
+              + 'from another before importing.'}
         </Text>
 
         {/* ---- step 1: which team ------------------------------------- */}
@@ -132,69 +171,78 @@ export default function ImportPlayersSheet({ visible, team, roster, onClose, onI
             {sources.length === 0 && (
               <Text style={styles.empty}>
                 You don't coach another team yet. Once you do, last season's
-                roster can be copied over from here.
+                roster can be brought over from here.
               </Text>
             )}
-            {sources.map((t) => (
-              <Pressable key={t.id} onPress={() => setSourceId(t.id)} style={styles.row}>
-                <View style={styles.flex}>
-                  <Text style={styles.name}>{t.name}</Text>
-                  <Text style={styles.meta}>{t.season || 'No season set'}</Text>
-                </View>
-                <Text style={styles.chev}>›</Text>
-              </Pressable>
-            ))}
+            {sources.map((t) => {
+              const fromHere = Object.values(picked).filter((id) => id === t.id).length;
+              return (
+                <Pressable key={t.id} onPress={() => setSourceId(t.id)} style={styles.row}>
+                  <View style={styles.flex}>
+                    <Text style={styles.name}>{t.name}</Text>
+                    <Text style={styles.meta}>
+                      {t.season || 'No season set'}
+                      {fromHere ? ` · ${fromHere} picked` : ''}
+                    </Text>
+                  </View>
+                  <Text style={styles.chev}>›</Text>
+                </Pressable>
+              );
+            })}
           </ScrollView>
         )}
 
         {/* ---- step 2: which players ----------------------------------- */}
-        {source && rows === null && (
+        {source && loading && (
           <View style={styles.loading}><ActivityIndicator color={colors.primary} /></View>
         )}
 
-        {source && rows?.length === 0 && (
+        {source && !loading && rows?.length === 0 && (
           <Text style={styles.empty}>That team has no players to import.</Text>
         )}
 
-        {source && !!rows?.length && (
+        {source && !loading && !!rows?.length && (
           <>
             <View style={styles.listHead}>
               <Text style={styles.count}>
-                {selected.length} of {selectable.length} selected
+                {fromThisTeam} of {selectable.length} selected
               </Text>
-              <Pressable onPress={toggleAll} hitSlop={6}>
-                <Text style={styles.link}>{allOn ? 'Clear all' : 'Select all'}</Text>
-              </Pressable>
+              {selectable.length > 0 && (
+                <Pressable onPress={toggleAll} hitSlop={6}>
+                  <Text style={styles.link}>{allOn ? 'Clear all' : 'Select all'}</Text>
+                </Pressable>
+              )}
             </View>
 
             <ScrollView style={styles.list}>
               {rows.map((r) => {
-                const on = selected.includes(r.playerId);
+                const state = rowState(r, picked, sourceId);
+                const locked = rowIsLocked(state);
+                const on = state === ROW_STATE.ON;
                 return (
                   <Pressable
                     key={r.playerId}
-                    onPress={() => !r.alreadyOnRoster && toggle(r.playerId)}
-                    disabled={r.alreadyOnRoster}
-                    style={[styles.row, on && styles.rowOn, r.alreadyOnRoster && styles.rowOff]}
+                    onPress={() => !locked && toggle(r.playerId)}
+                    disabled={locked}
+                    style={[styles.row, on && styles.rowOn, locked && styles.rowOff]}
                     accessibilityRole="checkbox"
-                    accessibilityState={{ checked: on }}
+                    accessibilityState={{ checked: on, disabled: locked }}
                     accessibilityLabel={`${r.firstName} ${r.lastName}`.trim()}
                   >
                     <View style={[styles.box, on && styles.boxOn]}>
                       {on && <Text style={styles.tick}>✓</Text>}
                     </View>
                     <View style={styles.flex}>
-                      <Text style={styles.name}>
-                        {r.firstName} {r.lastName}
-                      </Text>
-                      {/* The old number identifies the row and nothing more —
-                          it is not what gets imported. */}
+                      <Text style={styles.name}>{r.firstName} {r.lastName}</Text>
+                      {/* Last season's number identifies the row and nothing
+                          more — it is not what gets imported. */}
                       <Text style={styles.meta}>
-                        {r.alreadyOnRoster
-                          ? 'Already on this roster'
-                          : [r.formerJersey != null ? `Wore #${r.formerJersey}` : null,
-                             r.primaryPosition || null]
-                              .filter(Boolean).join(' · ') || 'No position'}
+                        {state === ROW_STATE.ALREADY_HERE ? 'Already on this roster'
+                         : state === ROW_STATE.PICKED_ELSEWHERE ? 'Already picked from another team'
+                         : [r.leftSourceTeam ? `Left ${source.name}` : null,
+                            r.formerJersey != null ? `Wore #${r.formerJersey}` : null,
+                            r.primaryPosition || null].filter(Boolean).join(' · ')
+                           || 'No position'}
                       </Text>
                     </View>
                   </Pressable>
@@ -204,16 +252,16 @@ export default function ImportPlayersSheet({ visible, team, roster, onClose, onI
 
             <Text style={styles.note}>
               Imported players keep their stats, career history and parent
-              links. Jersey numbers start blank — set them on the roster.
+              links. Numbers start blank — set them on the roster.
             </Text>
           </>
         )}
 
         <View style={styles.actions}>
-          {/* Back only exists when there was a choice to go back to. */}
+          {/* Back only exists when there's another team to go back to. */}
           {source && sources.length > 1 && (
             <Pressable onPress={() => setSourceId(null)} style={[styles.cta, styles.ctaGhost]}>
-              <Text style={[styles.ctaText, { color: colors.pencil }]}>BACK</Text>
+              <Text style={[styles.ctaText, { color: colors.pencil }]}>ANOTHER TEAM</Text>
             </Pressable>
           )}
           {!source && (
@@ -221,16 +269,12 @@ export default function ImportPlayersSheet({ visible, team, roster, onClose, onI
               <Text style={[styles.ctaText, { color: colors.pencil }]}>CANCEL</Text>
             </Pressable>
           )}
-          {source && (
-            <Pressable onPress={runImport} disabled={busy || !selected.length}
-              style={[styles.cta, styles.flex, !selected.length && styles.ctaOff]}>
-              {busy
-                ? <ActivityIndicator color="#FFF" />
-                : <Text style={styles.ctaText}>
-                    IMPORT {selected.length || ''}
-                  </Text>}
-            </Pressable>
-          )}
+          <Pressable onPress={runImport} disabled={busy || !pickedCount}
+            style={[styles.cta, styles.flex, !pickedCount && styles.ctaOff]}>
+            {busy
+              ? <ActivityIndicator color="#FFF" />
+              : <Text style={styles.ctaText}>IMPORT {pickedCount || ''}</Text>}
+          </Pressable>
         </View>
       </View>
     </Modal>
@@ -258,7 +302,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm,
   },
   rowOn: { borderColor: colors.primary },
-  rowOff: { opacity: 0.5 },
+  rowOff: { opacity: 0.45 },
   box: {
     width: 22, height: 22, borderRadius: 6, borderWidth: 1.5,
     borderColor: colors.line, backgroundColor: '#FFF',

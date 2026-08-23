@@ -112,7 +112,7 @@ export const MODE_TRADEOFFS = {
     loses: [],
   },
   [SCORING_MODES.CASUAL]: {
-    label: 'Outcomes only',
+    label: 'Outcomes',
     detail: 'Log what happened at each at-bat. Pitch entry stays on while your pitcher works.',
     keeps: ['AVG / OBP / SLG / OPS', 'RBI and runs', 'Pitch counts for your pitcher'],
     loses: ['Strike % for opposing pitchers', 'Pitch-by-pitch replay'],

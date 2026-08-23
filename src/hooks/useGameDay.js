@@ -18,6 +18,7 @@ import { useActiveTeam } from './ActiveTeam.jsx';
 import { sportForTeam } from '../sports/registry.js';
 import { ensureStatsAccess } from '../services/statsService.js';
 import { isGame } from '../shared/eventTypes.js';
+import { splitRoster } from '../shared/rosterStatus.js';
 
 export function useGameDay() {
   // Selected in the account menu; persists across launches.
@@ -27,7 +28,10 @@ export function useGameDay() {
   const [allGames, setAllGames] = useState([]);
   const [allEvents, setAllEvents] = useState([]);
   const [gameLoading, setGameLoading] = useState(true);
-  const [roster, setRoster] = useState([]);
+  // Everyone the team has ever rostered, current and former. Split below:
+  // `roster` is who's on the team NOW, which is what every game-facing screen
+  // means by the word.
+  const [allRoster, setAllRoster] = useState([]);
   const [error, setError] = useState(null);
 
   // ---- the game in progress, or the next one up ---------------------------
@@ -98,10 +102,20 @@ export function useGameDay() {
           }, { merge: true }).catch(() => {});
         }));
 
-        setRoster(rows.sort((a, b) => (a.jerseyNumber ?? 999) - (b.jerseyNumber ?? 999)));
+        setAllRoster(rows);
       } catch (e) { setError(e); }
     }, (e) => setError(e));
   }, [team?.id]);
+
+  /**
+   * Current squad and former players, from the one subscription.
+   *
+   * A player who has left keeps their roster entry — it's the only place the
+   * whole team can read their name, and every box score they appear in needs
+   * it. They're just not on the team any more, so they're out of `roster`.
+   */
+  const { active: roster, left: formerPlayers } = useMemo(
+    () => splitRoster(allRoster), [allRoster]);
 
   /**
    * Silent one-time repair for teams whose access lists predate the triggers
@@ -146,8 +160,11 @@ export function useGameDay() {
   }, [game, roster, sport]);
 
   const names = useMemo(() => {
+    // Built from the FULL roster, not the current squad: a finished game's
+    // box score names whoever played in it, including players who have since
+    // left the team.
     const map = Object.fromEntries(
-      roster.map((p) => [p.playerId, `${p.firstName} ${p.lastName}`.trim()])
+      allRoster.map((p) => [p.playerId, `${p.firstName} ${p.lastName}`.trim()])
     );
     // The other dugout is anonymous slots, but they still appear as the batter,
     // on deck, and in the hole. Numbering them 1-9 beats showing a raw
@@ -155,14 +172,16 @@ export function useGameDay() {
     for (let i = 1; i <= 12; i++) map[`opp_${i}`] = `Batter ${i}`;
     map.opp_p = 'Opponent';
     return map;
-  }, [roster]);
+  }, [allRoster]);
 
   return {
     team,
     game,
     allGames,
     allEvents,
-    roster,
+    roster,          // on the team now
+    formerPlayers,   // left, but still named in the record
+    allRoster,
     rules,
     config,
     names,
