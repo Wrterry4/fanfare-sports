@@ -39,6 +39,7 @@ import { useAuth } from '../hooks/AuthProvider.jsx';
 import { requestBaton, approveBaton, denyBaton } from '../services/gameService.js';
 import { db, doc, updateDoc } from '../services/firebase';
 import { confirm, notify } from '../utils/confirm.js';
+import { finalizeGameStats, FINALIZE } from '../services/finalizeStats.js';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
 import { sportThemeOf } from '../theme/useSportTheme.js';
 
@@ -302,6 +303,34 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
     celebratedRef.current = true;
     setCelebration(describeOutcome(state, game?.homeOrAway));
   }, [state, game?.homeOrAway]);
+
+  /**
+   * Commit the game's stats the moment it ends.
+   *
+   * Season totals are written by the finalizeGame Cloud Function and by
+   * nothing else — and nothing in the app ever called it, so no player on any
+   * team ever had a season document. That is the entire reason the stats
+   * screens were empty: the write path stopped existing halfway.
+   *
+   * Attempted once per mounted game. The server refuses a game it has already
+   * finalized, so two devices watching the same game race harmlessly and
+   * exactly one wins. Nothing is announced on success — this is bookkeeping,
+   * and the celebration is already on screen saying the game ended.
+   */
+  const finalizedRef = useRef(false);
+  useEffect(() => {
+    if (state?.status !== 'final' || finalizedRef.current) return;
+    finalizedRef.current = true;
+    finalizeGameStats(team.id, game.id).then((result) => {
+      // Worth saying once: with no functions deployed the stats will never
+      // appear, and silence there looks like the scoring lost them.
+      if (result === FINALIZE.UNAVAILABLE) {
+        notify('Stats not saved',
+          'Season stats need Cloud Functions deployed. The game itself is safe — '
+          + 'run firebase deploy --only functions to start saving stats.');
+      }
+    });
+  }, [state?.status, team.id, game.id]);
 
   if (!state) return <Centered><ActivityIndicator color={colors.primary} /></Centered>;
 
