@@ -20,6 +20,7 @@ import { useNavigation } from '@react-navigation/native';
 import AppHeader from '../components/AppHeader.jsx';
 import AccountSheet from '../components/AccountSheet.jsx';
 import SoundboardSheet from '../components/SoundboardSheet.jsx';
+import AdvanceSheet from '../components/AdvanceSheet.jsx';
 import MomentBanner from '../components/MomentBanner.jsx';
 import { findNewMoment } from '../shared/momentDetection.js';
 import { resolveTeamColor } from '../shared/teamColors.js';
@@ -132,6 +133,7 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
     describePeriod, describeCounters, describePeriodScores,
     describeParticipants, describeSubstitution, describeUpNext,
     describeFeedEntry, describeStatLine, EMPTY_FEED_TEXT,
+    describeAdvancePrompt,
   } = sport;
   const { user } = useAuth();
   const { height } = useWindowDimensions();
@@ -156,6 +158,8 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
    */
   const [selectedPlayerId, setSelectedPlayerId] = useState(null);
   const [cardFor, setCardFor] = useState(null);
+  /** A hit waiting on the scorekeeper to place its runners. */
+  const [advancePrompt, setAdvancePrompt] = useState(null);
   const [muted, setMuted] = useState(false);
   const [playingFor, setPlayingFor] = useState(null);
 
@@ -204,6 +208,27 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
     enabled: canScore && !muted && (state?.status === 'live' || game.status === 'live'),
     audioConfig,
   });
+
+  /**
+   * Every scoring action goes through here on its way to the log.
+   *
+   * Most pass straight through. A hit that left a runner with a real decision
+   * — someone who could have held rather than being forced along — opens the
+   * advance sheet instead, and the event is recorded when that sheet is
+   * confirmed. Which plays qualify is the sport pack's call, not this
+   * screen's: basketball's describeAdvancePrompt returns null for everything,
+   * so nothing here needs to know which sport it's rendering.
+   */
+  const recordPlay = useCallback((type, payload = {}) => {
+    const prompt = payload.advances
+      ? null
+      : describeAdvancePrompt?.(state, type, { personFor, jerseyFor });
+    if (prompt) {
+      setAdvancePrompt({ ...prompt, payload });
+      return;
+    }
+    record(type, payload);
+  }, [record, state, personFor, jerseyFor, describeAdvancePrompt]);
 
   const handleUndo = useCallback(async () => {
     const ok = await confirm({
@@ -536,7 +561,7 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
             selectedPlayerId={selectedPlayerId}
             onSelectPlayer={setSelectedPlayerId}
             participants={participants}
-            onEvent={record} onUndo={handleUndo}
+            onEvent={recordPlay} onUndo={handleUndo}
             onMore={() => setRunnerSheet({ base: null, playerId: null })}
             disabled={state.status === 'final'}
           />
@@ -561,6 +586,15 @@ function LiveGame({ headerWith, team, game, roster, rules, config, names }) {
         // doesn't move until the game is finalized.
         liveLine={cardFor ? stats?.batting?.[cardFor.playerId] : null}
         onClose={() => setCardFor(null)}
+      />
+
+      <AdvanceSheet
+        spec={advancePrompt}
+        onCancel={() => setAdvancePrompt(null)}
+        onConfirm={(advances) => {
+          record(advancePrompt.eventType, { ...advancePrompt.payload, advances });
+          setAdvancePrompt(null);
+        }}
       />
 
       <SubstitutionSheet

@@ -15,6 +15,7 @@
 
 import { EV, PA_ENDING, HITS, HIT_BASES, NO_RBI_EVENTS } from './events.js';
 import { DEFAULT_RULES } from './rules.js';
+import { normalizeAdvances, SCORED } from './advances.js';
 
 // ---------------------------------------------------------------------------
 // Initial state
@@ -346,9 +347,27 @@ function applyOutcome(state, event, rules, names) {
 
   if (HITS.has(type)) {
     const n = HIT_BASES[type];
-    const adv = advanceAll(next.bases, n);
-    next.bases = adv.bases;
-    scored = adv.scored;
+    /**
+     * Runners move where the play actually put them, not uniformly with the
+     * batter. `payload.advances` carries the scorekeeper's answer when one was
+     * asked for; when it's absent this reproduces the old behaviour exactly,
+     * because defaultAdvances IS the old behaviour, clamped to what's legal.
+     *
+     * Normalized rather than trusted: the sheet should never emit an illegal
+     * set, but an event can arrive from an older build or a hand-edited
+     * document, and the reducer must not be what decides a game by believing
+     * it. See advances.js.
+     */
+    const placed = normalizeAdvances(next.bases, n, payload.advances);
+    const after = { 1: null, 2: null, 3: null };
+    for (const from of [3, 2, 1]) {
+      const runner = next.bases[from];
+      if (!runner) continue;
+      const dest = placed[from];
+      if (dest >= SCORED) scored.push(runner);
+      else after[dest] = runner;
+    }
+    next.bases = after;
     if (n >= 4) scored.push(batter);
     else next.bases[n] = batter;
 

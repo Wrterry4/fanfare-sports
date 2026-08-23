@@ -407,5 +407,13 @@ export function describeMoment(event, state, { personFor } = {}) {
   }
 }
 
+/**
+ * Basketball has no runner advancement — nothing in the sport has this shape.
+ * Present, and returning null, because the shared screen calls it on every
+ * play and a missing function would mean the screen checking which sport it
+ * is holding.
+ */
+export const describeAdvancePrompt = () => null;
+
 /** Basketball has no walk-up song slot — the ball never stops for one. */
 export const walkUpSlot = null;

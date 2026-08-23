@@ -22,9 +22,10 @@
  * ────────────────────────────────────────────────────────────────────────────
  */
 
-import { EV } from './events.js';
+import { EV, HIT_BASES } from './events.js';
 import { weArePitching } from './scoringModes.js';
 import { pickPhrase } from '../pickPhrase.js';
+import { isAmbiguous, runnerOptions } from './advances.js';
 
 /** Private here rather than imported — engine.js keeps its copy unexported. */
 const fieldingSide = (s) => (s.isTop ? 'home' : 'away');
@@ -526,6 +527,48 @@ export function describeMoment(event, state, { personFor } = {}) {
     default:
       return null;
   }
+}
+
+const BASE_LABEL = { 1: '1ST', 2: '2ND', 3: '3RD', 4: 'SCORE' };
+
+/**
+ * Does this play need the scorekeeper to say where the runners ended up?
+ *
+ * Returns null — meaning "just record it" — unless a runner genuinely had a
+ * choice. A runner standing on or behind the base the batter is taking is
+ * forced and has nothing to decide; asking about those would put a sheet in
+ * front of the scorekeeper on nearly every hit in the game. See advances.js
+ * for the rule and why it is drawn there.
+ *
+ * The screen calls this before recording and never needs to know what a base
+ * is. Basketball returns null from its own copy, because nothing in that sport
+ * has this shape.
+ *
+ * @returns null, or { eventType, n, runners: [...] } ready for AdvanceSheet
+ */
+export function describeAdvancePrompt(state, eventType, { personFor, jerseyFor } = {}) {
+  const n = HIT_BASES[eventType];
+  if (!n || !isAmbiguous(state?.bases, n)) return null;
+
+  const runners = runnerOptions(state.bases, n).map((o) => {
+    const person = personFor?.(o.runner);
+    return {
+      from: o.from,
+      playerId: o.runner,
+      name: person?.firstName || 'Runner',
+      jersey: jerseyFor?.(o.runner) ?? null,
+      forced: o.forced,
+      selected: o.fallback,
+      choices: o.choices.map((dest) => ({
+        dest,
+        // "HOLD" rather than the base's own name: what matters to the person
+        // tapping is whether the runner moved, not which bag they're on.
+        label: dest === o.from ? 'HOLD' : BASE_LABEL[dest],
+      })),
+    };
+  });
+
+  return { eventType, n, runners };
 }
 
 /** Which participants a sport considers "on the clock" for auto-play audio. */
