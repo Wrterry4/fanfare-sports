@@ -792,7 +792,9 @@ async function notifyGuardians(playerId, { title, body, data }) {
 // Re-exported so `firebase deploy --only functions` picks everything up from
 // this single entry point.
 // ---------------------------------------------------------------------------
-export { createTeam, transferTeamOwnership } from './teams.js';
+export {
+  createTeam, transferTeamOwnership, joinWithCode, previewTeamPublic,
+} from './teams.js';
 export {
   requestPlayerClaim, resolvePlayerClaim, assignGuardian,
   propagateDisplayName, propagatePlayerName,

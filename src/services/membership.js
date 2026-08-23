@@ -25,6 +25,7 @@ import {
 } from './firebase';
 import { call } from './callable.js';
 import { currentUid } from './authService.js';
+import { SPARK_MODE } from './bootstrap.js';
 
 export const ROLE_LABELS = {
   owner: 'Head coach',
@@ -40,16 +41,43 @@ const DEFAULT_PREFS = {
 };
 
 /** Preview before joining, so nobody commits to an unnamed team. */
+/**
+ * What the join screen shows before anyone commits.
+ *
+ * Reading the team document directly only works where any signed-in user may
+ * read any team — which is the development rules, not production. The join
+ * code is a FIELD on that document, so opening the read would hand every join
+ * code in the project to anyone with an account. The function returns the
+ * three display fields and never the code.
+ */
 export async function previewTeam(teamId) {
+  if (!SPARK_MODE) {
+    const res = await call('previewTeamPublic', { teamId });
+    return res || null;
+  }
   const snap = await getDoc(doc(db, 'teams', teamId));
   if (!snap.exists()) return null;
   const t = snap.data();
   return { id: snap.id, name: t.name, season: t.season, division: t.division };
 }
 
+/**
+ * Join by typing the code a coach shared.
+ *
+ * On Blaze this is a function, because the check has to happen somewhere the
+ * client can't see: comparing the code client-side requires reading the team
+ * document, and the code lives on it. See functions/teams.js joinWithCode.
+ *
+ * The Spark path below is the original client version, kept because Spark has
+ * no functions at all and the relaxed dev rules are what make it work.
+ */
 export async function joinTeamWithCode({ teamId, code, role = 'parent' }) {
   const uid = currentUid();
   if (!uid) throw new Error('Sign in first.');
+
+  if (!SPARK_MODE) {
+    return call('joinWithCode', { teamId, code, role });
+  }
 
   // Carried onto the member doc so team lists and chat can show a name —
   // nobody can read another person's user document.

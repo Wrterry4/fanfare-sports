@@ -1,8 +1,8 @@
 {
   "firestore": {
-    "rules": "firestore.rules.dev",
+    "rules": "firestore.rules",
     "indexes": "firestore.indexes.json",
-    "//": "DEV: pointing at relaxed rules for Spark. Switch to firestore.rules before real users."
+    "//": "Production rules. firestore.rules.dev is the relaxed Spark-mode set — point here only with EXPO_PUBLIC_SPARK_MODE=true, since it lets a client write player and team documents that functions own on Blaze."
   },
   "storage": {
     "rules": "storage.rules"

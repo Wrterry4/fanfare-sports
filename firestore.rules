@@ -29,6 +29,17 @@ service cloud.firestore {
     function isMember(teamId) {
       return signedIn() && exists(memberPath(teamId));
     }
+    /**
+     * The caller's own member document, for rules that need a field off it
+     * rather than just the role.
+     *
+     * This was being CALLED by the RSVP rule and defined by neither file, so
+     * the ruleset failed to compile and `firebase deploy --only
+     * firestore:rules` rejected it outright.
+     */
+    function member(teamId) {
+      return get(memberPath(teamId));
+    }
     function memberRole(teamId) {
       return get(memberPath(teamId)).data.role;
     }
@@ -140,15 +151,32 @@ service cloud.firestore {
       // account with a child attached, minted from the client. createPlayer()
       // mints the career code and seeds access; nothing else may.
       allow create: if false;
-      allow update: if isGuardian(playerId)
-                    // All three are function-managed. Editing them here would
-                    // let a user grant access to a child. rosteredTeamIds
-                    // matters because syncPlayerAccess() derives
-                    // authorizedUserIds from it — adding a team id is an
-                    // indirect way to hand that team's staff a child's record.
-                    && !request.resource.data.diff(resource.data).affectedKeys()
-                         .hasAny(['authorizedUserIds', 'guardianUserIds',
-                                  'statsViewerUids', 'rosteredTeamIds']);
+      /**
+       * Two shapes of edit, deliberately different in width.
+       *
+       * A GUARDIAN may change the record: birth year, media consent, the name.
+       * That's their child.
+       *
+       * ANYONE AUTHORIZED on the player — which by construction is guardians,
+       * approved followers, and the staff of every team they're rostered on —
+       * may change the NAME AND NOTHING ELSE. This exists because a coach
+       * typing in a roster is not a guardian of those children, and the roster
+       * screen edits names. Without it, fixing a typo in "Micheal" fails with
+       * insufficient permissions for the one person most likely to notice it.
+       *
+       * The three protected arrays stay function-managed under both branches.
+       * Editing them would let a user grant access to a child, and
+       * rosteredTeamIds matters most: syncPlayerAccess() derives
+       * authorizedUserIds from it, so adding a team id is an indirect way to
+       * hand that team's staff a child's record.
+       */
+      allow update: if (isGuardian(playerId)
+                        && !request.resource.data.diff(resource.data).affectedKeys()
+                             .hasAny(['authorizedUserIds', 'guardianUserIds',
+                                      'statsViewerUids', 'rosteredTeamIds']))
+                    || (canSeePlayer(playerId)
+                        && request.resource.data.diff(resource.data).affectedKeys()
+                             .hasOnly(['firstName', 'lastName']));
       allow delete: if false;
 
       // Season and career stats. Separate documents specifically so this
@@ -193,6 +221,26 @@ service cloud.firestore {
     // function can do. Coaches see invite status through invitePipeline().
     match /invites/{inviteId} {
       allow read, write: if false;
+    }
+
+
+    /**
+     * Player claims — "I'm Jack's dad, please link me."
+     *
+     * Read-only to the person who asked and to the coaches who have to answer.
+     * Every write goes through requestPlayerClaim / resolvePlayerClaim,
+     * because approving one grants access to a child and no client may do that
+     * on its own say-so.
+     *
+     * Production had no rule here, so a member's own pending claims — which
+     * the roster screen subscribes to for everybody — were denied.
+     */
+    match /claims/{claimId} {
+      allow read: if signedIn() && (
+                    resource.data.requestedBy == uid()
+                    || isStaff(resource.data.teamId)
+                  );
+      allow write: if false;
     }
 
     // ---- transfers -------------------------------------------------------
@@ -258,6 +306,32 @@ service cloud.firestore {
         allow read:   if isMember(teamId);
         allow create: if isStaff(teamId);
         allow delete: if isStaff(teamId);
+
+
+        /**
+         * Attendance. Production had no rule for this at all, so every read
+         * and write fell through to the default deny — the whole RSVP feature
+         * worked only against the relaxed dev rules.
+         *
+         * Answers are keyed by PLAYER, with a `u_` prefix for someone
+         * answering for themselves (see shared/eventTypes.js). So the write
+         * rule has three legs: your own answer, an answer for a child you're
+         * linked to, or a coach answering for anybody — which is what a coach
+         * with a text message from a parent actually does.
+         *
+         * Fans are excluded from both. A grandparent following one child has
+         * no business reading the team's attendance sheet.
+         */
+        match /rsvps/{rsvpId} {
+          allow read:  if isMember(teamId) && !isFan(teamId);
+          allow write: if isMember(teamId) && !isFan(teamId)
+                       && request.resource.data.setBy == uid()
+                       && (
+                         rsvpId == 'u_' + uid()
+                         || rsvpId in member(teamId).data.linkedPlayerIds
+                         || isStaff(teamId)
+                       );
+        }
 
         /**
          * Sign-up slots — snacks, drinks, field setup.

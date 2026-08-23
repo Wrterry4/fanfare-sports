@@ -52,6 +52,17 @@ service cloud.firestore {
     function isMember(teamId) {
       return signedIn() && exists(memberPath(teamId));
     }
+    /**
+     * The caller's own member document, for rules that need a field off it
+     * rather than just the role.
+     *
+     * This was being CALLED by the RSVP rule and defined by neither file, so
+     * the ruleset failed to compile and `firebase deploy --only
+     * firestore:rules` rejected it outright.
+     */
+    function member(teamId) {
+      return get(memberPath(teamId));
+    }
     function memberRole(teamId) {
       return get(memberPath(teamId)).data.role;
     }

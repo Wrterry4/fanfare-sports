@@ -4,7 +4,7 @@
   "private": true,
   "main": "expo/AppEntry.js",
   "scripts": {
-    "test": "node tests/firebaseExports.test.js && node tests/activeTeamResolution.test.js && node tests/momentDetection.test.js && node tests/momentPhrases.test.js && node tests/buildLabel.test.js && node tests/teamColors.test.js && node tests/gameOutcome.test.js && node tests/shareCaption.test.js && node scripts/check-hooks.mjs && node tests/engine.test.js && node tests/advances.test.js && node tests/finalize.test.js && node tests/invites.test.js && node tests/scoringModes.test.js && node tests/summary.test.js && node tests/attendance.test.js && node tests/statsAccess.test.js && node tests/teamGrouping.test.js && node tests/rosterImport.test.js && node tests/rosterStatus.test.js && node tests/teamInvites.test.js && node tests/accountSummary.test.js && node tests/docIds.test.js && node tests/polls.test.js && node tests/signups.test.js && node tests/photos.test.js && node tests/departures.test.js && node tests/gameReadiness.test.js && node tests/audioProbe.test.js && node tests/pushEligibility.test.js && node tests/soundboardCatalog.test.js && node tests/scheduleFilters.test.js && node tests/basketball.test.js && node tests/gameIdentity.test.js && node tests/serverDispatch.test.js && node tests/sportContract.test.js && node tests/functionsLoad.test.js",
+    "test": "node tests/firebaseExports.test.js && node tests/activeTeamResolution.test.js && node tests/momentDetection.test.js && node tests/momentPhrases.test.js && node tests/buildLabel.test.js && node tests/teamColors.test.js && node tests/gameOutcome.test.js && node tests/shareCaption.test.js && node scripts/check-hooks.mjs && node scripts/check-rules.mjs && node tests/engine.test.js && node tests/advances.test.js && node tests/finalize.test.js && node tests/invites.test.js && node tests/scoringModes.test.js && node tests/summary.test.js && node tests/attendance.test.js && node tests/statsAccess.test.js && node tests/teamGrouping.test.js && node tests/rosterImport.test.js && node tests/rosterStatus.test.js && node tests/teamInvites.test.js && node tests/accountSummary.test.js && node tests/docIds.test.js && node tests/polls.test.js && node tests/signups.test.js && node tests/photos.test.js && node tests/departures.test.js && node tests/gameReadiness.test.js && node tests/audioProbe.test.js && node tests/pushEligibility.test.js && node tests/soundboardCatalog.test.js && node tests/scheduleFilters.test.js && node tests/basketball.test.js && node tests/gameIdentity.test.js && node tests/serverDispatch.test.js && node tests/sportContract.test.js && node tests/functionsLoad.test.js",
     "test:rules": "firebase emulators:exec --only firestore \"vitest run tests/rules\"",
     "prototype": "node build-prototype.mjs",
     "lint:jsx": "esbuild App.jsx --loader:.jsx=jsx --outfile=/dev/null",
@@ -14,8 +14,8 @@
     "build:web": "node scripts/stamp-build.mjs && expo export --platform web && node scripts/finalize-web.mjs",
     "deploy:web": "npm run build:web && firebase deploy --only hosting",
     "deploy:backend": "firebase deploy --only firestore:rules,storage:rules,firestore:indexes,functions",
-    "predeploy:check": "node functions/build-shared.js && node tests/functionsLoad.test.js",
-    "check": "node scripts/check-imports.mjs && node scripts/check-tdz.mjs && node scripts/check-hooks.mjs"
+    "predeploy:check": "node functions/build-shared.js && node tests/functionsLoad.test.js && node scripts/check-rules.mjs",
+    "check": "node scripts/check-imports.mjs && node scripts/check-tdz.mjs && node scripts/check-hooks.mjs && node scripts/check-rules.mjs"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "1.23.1",

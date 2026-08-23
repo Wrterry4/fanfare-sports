@@ -150,3 +150,114 @@ export const transferTeamOwnership = onCall(async (req) => {
 
   return { ok: true };
 });
+
+// ===========================================================================
+// Joining with a code
+// ===========================================================================
+
+/**
+ * Look at a team before joining it, signed out.
+ *
+ * Unauthenticated on purpose: the join screen creates the account inline, and
+ * asking someone to sign up before telling them what they're signing up for is
+ * where invite funnels lose people. Same reasoning as previewInvite().
+ *
+ * Returns the name, season and division — and NOT the join code, which is the
+ * whole reason this can't be a client read of the team document.
+ */
+export const previewTeamPublic = onCall(async (req) => {
+  const { teamId } = req.data || {};
+  if (!teamId) throw new HttpsError('invalid-argument', 'No team given.');
+
+  const snap = await db.doc(`teams/${teamId}`).get();
+  if (!snap.exists) return null;
+
+  const t = snap.data();
+  return {
+    id: snap.id,
+    name: t.name || null,
+    season: t.season || null,
+    division: t.division || null,
+  };
+});
+
+/**
+ * Join a team by typing the code the coach shared.
+ *
+ * ── Why this can't stay on the client ─────────────────────────────────────
+ *
+ * The client version read the team document to compare the code. Under the
+ * development rules that works, because any signed-in user may read any team.
+ * In production that read is closed, and opening it would be worse than the
+ * problem it solves: the join code is a FIELD on the team document, so letting
+ * anyone read the document hands them the code for every team in the project.
+ *
+ * Checking it here is the only shape where the code stays secret AND the
+ * person is allowed in — the comparison happens somewhere the client can't
+ * see, and the membership write happens with credentials no client has.
+ *
+ * Owner is never grantable this way. A team has one owner, established at
+ * creation and moved only by transferTeamOwnership().
+ */
+export const joinWithCode = onCall(async (req) => {
+  const uid = requireAuth(req);
+  const { teamId, code, role = 'parent' } = req.data || {};
+
+  if (!teamId) throw new HttpsError('invalid-argument', 'No team given.');
+  if (!['parent', 'fan', 'coach'].includes(role)) {
+    throw new HttpsError('invalid-argument', 'That is not a role you can join as.');
+  }
+
+  const teamSnap = await db.doc(`teams/${teamId}`).get();
+  if (!teamSnap.exists) throw new HttpsError('not-found', 'That team no longer exists.');
+
+  const expected = String(teamSnap.data().joinCode || '').trim().toUpperCase();
+  const given = String(code || '').trim().toUpperCase();
+  if (!expected || expected !== given) {
+    // Deliberately the same message whether the code is wrong or the team has
+    // none: a precise error turns this into an oracle for probing codes.
+    throw new HttpsError('permission-denied', "That join code isn't correct.");
+  }
+
+  const memberRef = db.doc(`teams/${teamId}/members/${uid}`);
+  const existing = await memberRef.get();
+  if (existing.exists) {
+    // Already on the team is a no-op, not an error worth showing anybody.
+    return { teamId, alreadyMember: true, role: existing.data().role };
+  }
+
+  const me = (await db.doc(`users/${uid}`).get()).data() || {};
+
+  await db.runTransaction(async (tx) => {
+    tx.set(memberRef, {
+      role,
+      // Denormalized so member lists and chat can show a name without reading
+      // another person's user document.
+      displayName: me.displayName || null,
+      linkedPlayerIds: [],
+      notificationPrefs: defaultPrefsFor(role),
+      invitedBy: null,
+      joinedAt: FieldValue.serverTimestamp(),
+    });
+    tx.set(db.doc(`users/${uid}`), {
+      teamIds: FieldValue.arrayUnion(teamId),
+    }, { merge: true });
+  });
+
+  return { teamId, alreadyMember: false, role };
+});
+
+/**
+ * A fan follows one child and stays out of team traffic; anyone else gets the
+ * ordinary set. Mirrors defaultNotificationPrefs() in shared/inviteRules.js —
+ * kept local so this file has no reason to import the invite module.
+ */
+function defaultPrefsFor(role) {
+  const base = {
+    gameStart: true, myPlayerAtBat: true, myPlayerResult: true,
+    allScoringPlays: false, finalScore: true,
+    announcements: true, chatter: true, directMessages: true,
+  };
+  if (role !== 'fan') return base;
+  return { ...base, chatter: false, announcements: false, directMessages: false };
+}
