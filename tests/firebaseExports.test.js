@@ -15,6 +15,15 @@
  * and app instance), so it checks source text directly: every name imported
  * `from '../services/firebase'` (or the platform-specific files themselves)
  * by any file in src/ must appear in each shim's own re-export list.
+ *
+ * ── One exception, and only one ────────────────────────────────────────────
+ *
+ * A `.web.js` module is never bundled on native — Metro resolves the platform
+ * suffix — so holding it to the native shim would forbid the whole point of
+ * having a platform split. socialAuth.web.js imports GoogleAuthProvider and
+ * signInWithPopup, neither of which the native SDK has anything to offer.
+ * Those files are checked against the web shim only; every other file, split
+ * or not, must satisfy both.
  */
 
 import { readdirSync, readFileSync, statSync } from 'fs';
@@ -86,10 +95,15 @@ for (const file of allFiles) {
   if (used.size === 0) continue;
   checkedAny = true;
 
+  // See the header: a .web.js file has no native bundle to break.
+  const webOnly = /\.web\.jsx?$/.test(file);
+
   for (const name of used) {
     const rel = file.replace(SRC + '/', 'src/');
     ok(`${rel}: '${name}' is exported from firebase.web.js`, webExports.has(name));
-    ok(`${rel}: '${name}' is exported from firebase.js`, nativeExports.has(name));
+    if (!webOnly) {
+      ok(`${rel}: '${name}' is exported from firebase.js`, nativeExports.has(name));
+    }
   }
 }
 

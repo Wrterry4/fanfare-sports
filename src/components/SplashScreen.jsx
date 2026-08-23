@@ -29,8 +29,15 @@ import { StyleSheet, Animated, Easing, useWindowDimensions } from 'react-native'
 import { FanfareLockup } from './FanfareLogo.jsx';
 import { colors } from '../theme/tokens.js';
 
-/** Long enough to register as intentional, short enough not to be a toll. */
-export const MIN_VISIBLE_MS = 1100;
+/**
+ * Long enough to register as intentional, short enough not to be a toll.
+ *
+ * 1600, not 1100. The tagline under the wordmark is 28 characters of tracked
+ * 10pt caps — it takes longer to read than the mark takes to recognise, and at
+ * 1100 it was gone before it had been read. Half a second is the difference
+ * between a logo that flashes and one that says something.
+ */
+export const MIN_VISIBLE_MS = 1600;
 /** After this, something is wrong and the app underneath should be visible. */
 export const MAX_VISIBLE_MS = 6000;
 const FADE_MS = 320;

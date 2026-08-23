@@ -3,16 +3,36 @@
  */
 
 import {
-  db, doc, collection, setDoc, deleteDoc, onSnapshot, serverTimestamp,
+  db, doc, collection, setDoc, deleteDoc, getDoc, onSnapshot, serverTimestamp,
 } from './firebase';
 import { currentUid } from './authService.js';
 import { EVENT_TYPES, rsvpIdForPlayer, rsvpIdForSelf } from '../shared/eventTypes.js';
+import { gameId, eventId as eventSlug, uniqueId } from '../shared/docIds.js';
 
 const eventsPath = (teamId) => collection(db, 'teams', teamId, 'games');
 
 export async function createEvent(teamId, data, rules) {
-  const ref = doc(eventsPath(teamId));
   const type = data.type || EVENT_TYPES.GAME;
+
+  /**
+   * A readable id: `2026-08-22-vs-hurricanes`, not `k3Jd8sPqR2xN1vB7`.
+   *
+   * A schedule entry has one natural identity — a date and who it's against —
+   * so it may as well say so in the console, in a rules test and in the URL
+   * this game is shared with. Doubleheaders get `-2`; anything undatable or
+   * unnameable falls back to the auto-id, because a wrong-looking id is worse
+   * than an opaque one. See shared/docIds.js.
+   */
+  const derived = type === EVENT_TYPES.GAME
+    ? gameId({ date: data.date, opponent: data.opponent, homeOrAway: data.homeOrAway })
+    : eventSlug({ date: data.date, type, title: data.title });
+
+  const free = await uniqueId(derived, async (id) =>
+    (await getDoc(doc(db, 'teams', teamId, 'games', id)).catch(() => null))?.exists?.() === true);
+
+  const ref = free
+    ? doc(db, 'teams', teamId, 'games', free)
+    : doc(eventsPath(teamId));
 
   await setDoc(ref, {
     type,

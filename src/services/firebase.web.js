@@ -37,9 +37,13 @@ export {
   serverTimestamp, writeBatch, increment, arrayUnion, arrayRemove, deleteField,
 } from 'firebase/firestore';
 export { httpsCallable } from 'firebase/functions';
+// The provider names below are Google and Facebook sign-in, and they are web
+// only — see services/socialAuth.js for why the native side has no equivalent.
 export {
   createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
   sendPasswordResetEmail, onAuthStateChanged, updateProfile,
+  GoogleAuthProvider, FacebookAuthProvider,
+  signInWithPopup, signInWithRedirect, getRedirectResult, linkWithPopup,
 } from 'firebase/auth';
 
 const config = {

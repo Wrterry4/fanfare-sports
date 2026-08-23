@@ -16,6 +16,7 @@ import React, { createContext, useContext, useEffect, useState, useRef } from 'r
 import { observeAuth, watchTokenRefresh, registerDevice } from '../services/authService.js';
 import { resolvePendingInvite } from '../navigation/linking.js';
 import { redeemInvite, postRedeemDestination } from '../services/inviteService.js';
+import { completeRedirectSignIn } from '../services/socialAuth.js';
 
 const AuthContext = createContext(null);
 
@@ -24,6 +25,14 @@ export function AuthProvider({ children }) {
   const [pendingDestination, setPendingDestination] = useState(null);
   const tokenWatcher = useRef(null);
   const inviteHandled = useRef(false);
+
+  /**
+   * A social sign-in that had to fall back to a redirect finishes HERE, on the
+   * load after the page came back. Firebase resolves the credential from the
+   * URL before the auth listener reports a user, so this has to run once at
+   * startup rather than in response to anything the person does.
+   */
+  useEffect(() => { completeRedirectSignIn().catch(() => {}); }, []);
 
   useEffect(() => {
     const unsub = observeAuth(async (u) => {

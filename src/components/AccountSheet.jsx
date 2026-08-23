@@ -5,6 +5,12 @@
  * at. Team *settings* stay on the Settings tab, because those belong to the
  * team rather than to you.
  *
+ * Your own details live one tap in, under Account. They were four fields and
+ * a hint at the top of the menu — the first thing you saw every time, and the
+ * thing you came here for least. The menu is for moving between teams and
+ * answering invitations; your phone number is a settings screen that happens
+ * to be reachable from it.
+ *
  * Invitations sit ABOVE everything else, including your own details. They're
  * the only thing in here waiting on an answer — a name and a phone number will
  * still be there tomorrow, and a parent who can't see their kid's new team
@@ -26,6 +32,9 @@ import { useMyTeamPlayers } from '../hooks/useMyTeamPlayers.js';
 import { useTeamInvites } from '../hooks/useTeamInvites.js';
 import { respondToTeamInvite } from '../services/teamInvites.js';
 import { inviteWording } from '../shared/teamInvites.js';
+import {
+  signInMethods, memberSince, linkedPlayerCount, linkedPlayerLabel,
+} from '../shared/accountSummary.js';
 import { groupTeamsByPlayer, groupingIsUseful, duplicateGroups }
   from '../shared/teamGrouping.js';
 import NewTeamSheet from './NewTeamSheet.jsx';
@@ -45,6 +54,8 @@ export default function AccountSheet({ visible, onClose }) {
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
   const [answering, setAnswering] = useState(null);
+  const [showAccount, setShowAccount] = useState(false);
+  const [userDoc, setUserDoc] = useState(null);
   const { invites } = useTeamInvites();
   // Role comes from the same member document as the linked players, so the
   // unlinked group can be labelled honestly.
@@ -63,12 +74,21 @@ export default function AccountSheet({ visible, onClose }) {
     getDoc(doc(db, 'users', user.uid))
       .then((snap) => {
         const d = snap.data() || {};
+        setUserDoc(d);
         setDisplayName(d.displayName || user.displayName || '');
         setPhone(d.phone || '');
         setDirty(false);
       })
       .catch(() => {});
   }, [visible, user?.uid]);
+
+  // Closing the menu drops back to the top level, so it doesn't reopen two
+  // screens deep tomorrow.
+  useEffect(() => { if (!visible) setShowAccount(false); }, [visible]);
+
+  const methods = useMemo(() => signInMethods(user), [user]);
+  const since = useMemo(() => memberSince(userDoc, user), [userDoc, user]);
+  const linkedCount = useMemo(() => linkedPlayerCount(byTeam), [byTeam]);
 
   const save = useCallback(async () => {
     setBusy(true);
@@ -189,35 +209,82 @@ export default function AccountSheet({ visible, onClose }) {
                 </View>
               )}
 
-              <Text style={styles.sectionLabel}>YOUR DETAILS</Text>
-              <Text style={styles.label}>Name</Text>
-              <TextInput value={displayName}
-                onChangeText={(v) => { setDisplayName(v); setDirty(true); }}
-                style={inputStyle} autoCapitalize="words"
-                placeholder="Wallace Terry" placeholderTextColor="#A0A8B8" />
+              {showAccount ? (
+                <>
+                  <Pressable onPress={() => setShowAccount(false)} style={styles.backRow}
+                    accessibilityRole="button">
+                    <Text style={styles.backChev}>‹</Text>
+                    <Text style={styles.backText}>Menu</Text>
+                  </Pressable>
 
-              <Text style={[styles.label, { marginTop: spacing.md }]}>Phone</Text>
-              <TextInput value={phone}
-                onChangeText={(v) => { setPhone(v); setDirty(true); }}
-                style={inputStyle} keyboardType="phone-pad"
-                placeholder="Optional" placeholderTextColor="#A0A8B8" />
+                  <Text style={styles.sectionLabel}>ACCOUNT</Text>
+                  <Text style={styles.label}>Display name</Text>
+                  <TextInput value={displayName}
+                    onChangeText={(v) => { setDisplayName(v); setDirty(true); }}
+                    style={inputStyle} autoCapitalize="words"
+                    placeholder="Wallace Terry" placeholderTextColor="#A0A8B8" />
 
-              <Text style={[styles.label, { marginTop: spacing.md }]}>Email</Text>
-              <View style={[inputStyle, styles.readonly]}>
-                <Text style={styles.readonlyText} numberOfLines={1}>{user?.email}</Text>
-              </View>
-              <Text style={styles.hint}>
-                Changing your email means signing in again, so it's handled
-                separately.
-              </Text>
+                  <Text style={[styles.label, { marginTop: spacing.md }]}>Phone</Text>
+                  <TextInput value={phone}
+                    onChangeText={(v) => { setPhone(v); setDirty(true); }}
+                    style={inputStyle} keyboardType="phone-pad"
+                    placeholder="Optional" placeholderTextColor="#A0A8B8" />
 
-              {dirty && (
-                <Pressable onPress={save} disabled={busy} style={styles.cta}>
-                  {busy ? <ActivityIndicator color="#FFF" />
-                        : <Text style={styles.ctaText}>SAVE</Text>}
-                </Pressable>
+                  <Text style={[styles.label, { marginTop: spacing.md }]}>Email</Text>
+                  <View style={[inputStyle, styles.readonly]}>
+                    <Text style={styles.readonlyText} numberOfLines={1}>{user?.email}</Text>
+                  </View>
+                  <Text style={styles.hint}>
+                    Changing your email means signing in again, so it's handled
+                    separately.
+                  </Text>
+
+                  {dirty && (
+                    <Pressable onPress={save} disabled={busy} style={styles.cta}>
+                      {busy ? <ActivityIndicator color="#FFF" />
+                            : <Text style={styles.ctaText}>SAVE</Text>}
+                    </Pressable>
+                  )}
+
+                  {/* Read-only facts, below the things you can change. Each
+                      one answers a question people actually ask support:
+                      which account is this, how did I sign in, how many of my
+                      kids are attached. */}
+                  <View style={styles.facts}>
+                    <Fact label="Signed in with" value={methods.join(' · ') || 'Email & password'} />
+                    <Fact label="Linked players" value={linkedPlayerLabel(linkedCount)} />
+                    <Fact label="Teams" value={`${teams.length}`} />
+                    {since ? <Fact label="Member since" value={since} last /> : null}
+                  </View>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.sectionLabel}>YOU</Text>
+                  <Pressable onPress={() => setShowAccount(true)} style={styles.accountRow}
+                    accessibilityRole="button">
+                    <View style={styles.avatar}>
+                      <Text style={styles.avatarText}>
+                        {(displayName || user?.email || '?').trim().charAt(0).toUpperCase()}
+                      </Text>
+                    </View>
+                    <View style={styles.flex}>
+                      <Text style={styles.accountName} numberOfLines={1}>
+                        {displayName || 'Add your name'}
+                      </Text>
+                      <Text style={styles.accountSub} numberOfLines={1}>
+                        {user?.email}
+                      </Text>
+                    </View>
+                    <Text style={styles.chev}>›</Text>
+                  </Pressable>
+                </>
               )}
 
+              {/* The rest of the menu steps aside while Account is open — a
+                  submenu that leaves the parent list underneath it reads as a
+                  section that failed to navigate. */}
+              {!showAccount && (
+                <>
               <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>
                 {teams.length > 1 ? 'YOUR TEAMS' : 'YOUR TEAM'}
               </Text>
@@ -316,6 +383,8 @@ export default function AccountSheet({ visible, onClose }) {
               <Pressable onPress={doSignOut} style={[styles.cta, styles.ctaGhost]}>
                 <Text style={[styles.ctaText, { color: colors.out }]}>SIGN OUT</Text>
               </Pressable>
+                </>
+              )}
             </ScrollView>
           </KeyboardAvoidingView>
         </View>
@@ -338,6 +407,16 @@ export default function AccountSheet({ visible, onClose }) {
   );
 }
 
+/** One read-only line: what it is on the left, what it says on the right. */
+function Fact({ label, value, last = false }) {
+  return (
+    <View style={[styles.factRow, last && styles.factLast]}>
+      <Text style={styles.factLabel}>{label}</Text>
+      <Text style={styles.factValue} numberOfLines={1}>{value}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   row: { flex: 1, flexDirection: 'row' },
   flex: { flex: 1 },
@@ -355,6 +434,34 @@ const styles = StyleSheet.create({
   headTitle: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 21, color: colors.navy },
   close: { fontSize: 20, color: colors.pencil, paddingHorizontal: 4 },
   sectionLabel: { ...text.label, color: colors.pencil, marginBottom: spacing.md },
+  accountRow: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line,
+    borderRadius: radius.md, padding: spacing.md,
+  },
+  avatar: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: colors.navy,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  avatarText: { fontFamily: 'Archivo', fontWeight: '800', fontSize: 17, color: '#FFF' },
+  accountName: { fontFamily: 'Archivo', fontWeight: '700', fontSize: 15, color: colors.navy },
+  accountSub: { ...text.body, fontSize: 12, color: colors.pencil, marginTop: 2 },
+  chev: { fontSize: 20, color: colors.pencil, paddingHorizontal: 4 },
+  backRow: { flexDirection: 'row', alignItems: 'center', gap: 2, marginBottom: spacing.md },
+  backChev: { fontSize: 22, color: colors.primary, lineHeight: 24 },
+  backText: { ...text.bodyStrong, fontSize: 13.5, color: colors.primary },
+  facts: {
+    marginTop: spacing.xl, backgroundColor: colors.card, borderWidth: 1,
+    borderColor: colors.line, borderRadius: radius.md, paddingHorizontal: spacing.md,
+  },
+  factRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    gap: spacing.md, paddingVertical: 11,
+    borderBottomWidth: 1, borderBottomColor: colors.line,
+  },
+  factLast: { borderBottomWidth: 0 },
+  factLabel: { ...text.body, fontSize: 12.5, color: colors.pencil },
+  factValue: { ...text.bodyStrong, fontSize: 12.5, color: colors.navy, flexShrink: 1, textAlign: 'right' },
   inviteBlock: { marginBottom: spacing.xl },
   inviteLabel: { color: colors.primary, marginBottom: spacing.sm },
   inviteRow: {

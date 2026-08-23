@@ -4,6 +4,11 @@
  * One screen rather than two: the only difference is a name field and which
  * function fires, and a separate route means an extra navigation step during
  * the moment a person is most likely to give up.
+ *
+ * The header is the same lockup and tagline the splash shows, on the same navy
+ * — this screen used to draw its own, older mark, so the first two screens of
+ * the app disagreed about what the app was called and what it looked like.
+ * A person arriving from a coach's text link sees one brand, twice.
  */
 
 import React, { useState, useCallback } from 'react';
@@ -12,22 +17,12 @@ import {
   KeyboardAvoidingView, Platform, ActivityIndicator, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Rect } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 
 import { signIn, signUp, resetPassword } from '../services/authService.js';
+import { SOCIAL_PROVIDERS, signInWithProvider } from '../services/socialAuth.js';
+import { FanfareLockup } from '../components/FanfareLogo.jsx';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
-
-function Wordmark() {
-  return (
-    <View style={styles.mark}>
-      <Svg viewBox="0 0 100 100" width={46} height={46}>
-        <Rect x={30} y={22} width={13} height={56} rx={4} fill="#FFFFFF" />
-        <Rect x={30} y={22} width={42} height={13} rx={4} fill={colors.gold} />
-        <Rect x={30} y={44} width={32} height={13} rx={4} fill={colors.primary} />
-      </Svg>
-    </View>
-  );
-}
 
 export default function SignInScreen() {
   const [mode, setMode] = useState('signin');
@@ -57,6 +52,23 @@ export default function SignInScreen() {
     }
   }, [isSignUp, displayName, email, password]);
 
+  /**
+   * A redirect leaves the page, so there is nothing to unset afterwards —
+   * `busy` stays true and the screen stays disabled while the browser
+   * navigates away, which is exactly right.
+   */
+  const social = useCallback(async (id) => {
+    setError(null); setNotice(null); setBusy(true);
+    try {
+      const user = await signInWithProvider(id);
+      // null means the person closed the chooser, or a redirect is in flight.
+      if (!user) setBusy(false);
+    } catch (e) {
+      setError(friendly(e));
+      setBusy(false);
+    }
+  }, []);
+
   const forgot = useCallback(async () => {
     if (!email.trim()) { setError('Enter your email first.'); return; }
     try {
@@ -73,13 +85,36 @@ export default function SignInScreen() {
         style={styles.flex}
       >
         <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
-          <Wordmark />
-          <Text style={styles.title}>Fanfare Sports</Text>
+          {/* Same navy panel as the splash, so the app doesn't appear to
+              change identity between the two screens. */}
+          <View style={styles.brand}>
+            <FanfareLockup scale={0.72} />
+          </View>
           <Text style={styles.sub}>
             {isSignUp ? 'Create an account to get started.' : 'Welcome back.'}
           </Text>
 
           <View style={styles.card}>
+            {SOCIAL_PROVIDERS.length > 0 && (
+              <>
+                {/* Above the fields, not below: for most parents this is the
+                    whole sign-up, and burying it under a form they don't need
+                    to fill in is what makes people abandon one. */}
+                {SOCIAL_PROVIDERS.map((p) => (
+                  <Pressable key={p.id} onPress={() => social(p.id)} disabled={busy}
+                    style={styles.social} accessibilityRole="button">
+                    <ProviderGlyph id={p.id} />
+                    <Text style={styles.socialText}>{p.label}</Text>
+                  </Pressable>
+                ))}
+                <View style={styles.orRow}>
+                  <View style={styles.rule} />
+                  <Text style={styles.orText}>or use email</Text>
+                  <View style={styles.rule} />
+                </View>
+              </>
+            )}
+
             {isSignUp && (
               <Field label="Your name" value={displayName} onChange={setName}
                      placeholder="Coach Wallace" autoCapitalize="words" />
@@ -136,6 +171,35 @@ function Field({ label, value, onChange, ...rest }) {
   );
 }
 
+/**
+ * The provider marks, drawn rather than fetched.
+ *
+ * Both brands publish exact-colour guidelines and both forbid recolouring, so
+ * these are the real marks at the real values — and drawn as SVG so there's no
+ * remote asset to load on the one screen that has to work before anything else
+ * does.
+ */
+function ProviderGlyph({ id }) {
+  if (id === 'google.com') {
+    return (
+      <Svg width={18} height={18} viewBox="0 0 48 48">
+        <Path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-2.7-.4-3.9H24v7.1h12.1c-.2 1.8-1.6 4.6-4.5 6.4l6.9 5.3c4.1-3.8 6.6-9.4 6.6-15z" />
+        <Path fill="#34A853" d="M24 46c5.9 0 10.9-2 14.5-5.3l-6.9-5.3c-1.9 1.3-4.4 2.2-7.6 2.2-5.8 0-10.7-3.8-12.5-9.1l-7.1 5.5C8.1 41.1 15.4 46 24 46z" />
+        <Path fill="#FBBC05" d="M11.5 28.5c-.5-1.4-.7-2.9-.7-4.5s.3-3.1.7-4.5l-7.1-5.5C2.9 17 2 20.4 2 24s.9 7 2.4 10z" />
+        <Path fill="#EA4335" d="M24 10.6c4.1 0 6.9 1.8 8.5 3.2l6.2-6C34.9 4.3 29.9 2 24 2 15.4 2 8.1 6.9 4.4 14l7.1 5.5c1.8-5.3 6.7-8.9 12.5-8.9z" />
+      </Svg>
+    );
+  }
+  if (id === 'facebook.com') {
+    return (
+      <Svg width={18} height={18} viewBox="0 0 24 24">
+        <Path fill="#1877F2" d="M24 12a12 12 0 1 0-13.9 11.9v-8.4H7.1V12h3V9.4c0-3 1.8-4.6 4.5-4.6 1.3 0 2.6.2 2.6.2v2.9h-1.5c-1.5 0-1.9.9-1.9 1.8V12h3.3l-.5 3.5h-2.8v8.4A12 12 0 0 0 24 12z" />
+      </Svg>
+    );
+  }
+  return null;
+}
+
 /** Firebase error codes are not sentences a person should have to read. */
 function friendly(e) {
   const code = e?.code || '';
@@ -148,7 +212,14 @@ function friendly(e) {
   if (code.includes('too-many-requests')) return 'Too many attempts. Wait a minute and try again.';
   if (code.includes('network')) return 'No connection. Check your signal and try again.';
   if (code.includes('operation-not-allowed'))
-    return 'Email sign-in is not enabled on this project yet.';
+    return 'That sign-in method is not enabled on this project yet.';
+  // One email, one account: Firebase links providers only after the person
+  // proves they own the account, and this is the message that says so.
+  if (code.includes('account-exists-with-different-credential'))
+    return 'That email already has an account. Sign in the way you did last '
+         + 'time, then link the other method from your account settings.';
+  if (code.includes('unauthorized-domain'))
+    return "This site isn't on the project's authorized domains list yet.";
   return e?.message || 'Something went wrong.';
 }
 
@@ -156,15 +227,22 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.chalk },
   flex: { flex: 1 },
   scroll: { padding: spacing.lg, paddingTop: 48, minHeight: '100%' },
-  mark: {
-    width: 64, height: 64, borderRadius: radius.lg, backgroundColor: colors.navy,
-    alignItems: 'center', justifyContent: 'center', alignSelf: 'center',
+  brand: {
+    backgroundColor: colors.navy, borderRadius: radius.lg,
+    paddingVertical: spacing.lg, paddingHorizontal: spacing.md,
+    alignItems: 'center', justifyContent: 'center',
   },
-  title: {
-    fontFamily: 'Archivo', fontWeight: '800', fontSize: 24, color: colors.navy,
-    textAlign: 'center', marginTop: spacing.md,
+  sub: { ...text.body, color: colors.pencil, textAlign: 'center', marginTop: spacing.md, marginBottom: spacing.lg },
+  social: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 10, height: 48, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.line, backgroundColor: '#FFF',
+    marginBottom: spacing.sm,
   },
-  sub: { ...text.body, color: colors.pencil, textAlign: 'center', marginTop: 4, marginBottom: spacing.lg },
+  socialText: { ...text.bodyStrong, fontSize: 14.5, color: colors.navy },
+  orRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginVertical: spacing.md },
+  rule: { flex: 1, height: 1, backgroundColor: colors.line },
+  orText: { ...text.label, color: colors.pencil },
   card: {
     backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line,
     borderRadius: radius.lg, padding: spacing.lg, ...shadow.card,
