@@ -428,6 +428,26 @@ export const finalizeGame = onCall(async (req) => {
   const gameSnap = await gameRef.get();
   const game = gameSnap.data();
 
+  /**
+   * Finalizing is NOT idempotent, so it must not run twice.
+   *
+   * Each run merges this game's slice into every player's season document.
+   * Running it again adds the same game a second time — a kid's season hit
+   * total climbing after a game nobody replayed, which reads exactly like
+   * stats leaking between games because that is what it is.
+   *
+   * Refusing outright rather than trying to detect and subtract: a correct
+   * re-finalize has to un-merge the previous contribution first, and a
+   * half-right version of that would corrupt the season quietly instead of
+   * loudly. An amended game needs that un-merge before it can be re-run.
+   */
+  if (game?.status === 'final') {
+    throw new HttpsError(
+      'failed-precondition',
+      'This game is already final. Undo a play to amend it before finalizing again.',
+    );
+  }
+
   const eventsSnap = await db.collection(`teams/${teamId}/games/${gameId}/events`)
     .orderBy('seq').get();
   const events = eventsSnap.docs.map((d) => d.data()).filter((e) => !e.voided);
