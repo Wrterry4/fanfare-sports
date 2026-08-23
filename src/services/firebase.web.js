@@ -37,6 +37,10 @@ export {
   serverTimestamp, writeBatch, increment, arrayUnion, arrayRemove, deleteField,
 } from 'firebase/firestore';
 export { httpsCallable } from 'firebase/functions';
+// Photo upload — see services/photoService.web.js.
+export {
+  ref, uploadBytes, getDownloadURL, deleteObject,
+} from 'firebase/storage';
 // The provider names below are Google and Facebook sign-in, and they are web
 // only — see services/socialAuth.js for why the native side has no equivalent.
 export {

@@ -18,6 +18,10 @@ export {
   serverTimestamp, writeBatch, increment, arrayUnion, arrayRemove, deleteField,
 } from '@react-native-firebase/firestore';
 export { httpsCallable } from '@react-native-firebase/functions';
+// Photo upload — see services/photoService.web.js.
+export {
+  ref, uploadBytes, getDownloadURL, deleteObject,
+} from '@react-native-firebase/storage';
 export {
   createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut,
   sendPasswordResetEmail, onAuthStateChanged, updateProfile,

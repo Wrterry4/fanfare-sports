@@ -41,6 +41,8 @@ const GLOBALS = new Set([
   'decodeURIComponent', 'setTimeout', 'clearTimeout', 'setInterval',
   'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame', 'fetch',
   'alert', 'confirm', 'prompt', 'structuredClone', 'queueMicrotask',
+  // Browser image APIs, used by the .web.js photo uploader.
+  'createImageBitmap', 'Image', 'FileReader', 'Blob',
 ]);
 
 function walk(dir, acc = []) {

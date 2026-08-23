@@ -188,6 +188,14 @@ export const sendTestNotification = onCall(async (req) => {
 // Team chat
 // ---------------------------------------------------------------------------
 
+/** What a message looks like in a notification banner. */
+function previewOf(msg) {
+  const text = (msg.text || '').slice(0, 140);
+  if (msg.kind === 'poll') return `📊 Poll · ${msg.poll?.question || text}`;
+  if (msg.kind === 'photo') return '📷 Sent a photo';
+  return text;
+}
+
 export const notifyTeamMessage = onDocumentCreated(
   'teams/{teamId}/channels/{channelId}/messages/{messageId}',
   async (event) => {
@@ -217,7 +225,10 @@ export const notifyTeamMessage = onDocumentCreated(
       title: channelId === 'announcements'
         ? `${teamLabel} · Announcement`
         : `${teamLabel} · Team Chat`,
-      body: `${msg.senderName || 'Someone'}: ${msg.text?.slice(0, 140) || ''}`,
+      // A poll and a photo carry `text` so nothing renders blank, but the
+      // banner should say which one arrived — "Coach: Who can make Saturday?"
+      // reads as a question somebody expects a typed answer to.
+      body: `${msg.senderName || 'Someone'}: ${previewOf(msg)}`,
       data: { type: channelId === 'announcements' ? 'announcement' : 'chatter',
               teamId, link: `/teams/${teamId}/messages` },
     });

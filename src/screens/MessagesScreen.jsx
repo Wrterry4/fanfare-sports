@@ -8,7 +8,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  View, Text, TextInput, Pressable, StyleSheet, ScrollView,
+  View, Text, TextInput, Pressable, StyleSheet, ScrollView, Image,
   ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 
@@ -20,8 +20,17 @@ import { useAuth } from '../hooks/AuthProvider.jsx';
 import {
   subscribeMembers, ensureConversation, conversationId, ROLE_LABELS,
 } from '../services/membership.js';
-import AppHeader, { SegmentedTabs } from '../components/AppHeader.jsx';
+import AppHeader, { HeaderButton, SegmentedTabs } from '../components/AppHeader.jsx';
 import AccountSheet from '../components/AccountSheet.jsx';
+import PollComposerSheet from '../components/PollComposerSheet.jsx';
+import PollBubble from '../components/PollBubble.jsx';
+import PhotoAlbumSheet from '../components/PhotoAlbumSheet.jsx';
+import { postPoll } from '../services/pollService.js';
+import {
+  pickPhoto, uploadPhoto, photoPickingSupported, postPhotoMessage,
+} from '../services/photoService.js';
+import { useMyRole } from '../hooks/useMyRole.js';
+import { notify } from '../utils/confirm.js';
 import ScreenRoot from '../components/ScreenRoot.jsx';
 import Centered from '../components/Centered.jsx';
 import { colors, radius, spacing, text, shadow } from '../theme/tokens.js';
@@ -37,6 +46,8 @@ export default function MessagesScreen() {
   const [members, setMembers] = useState([]);
   const [openDm, setOpenDm] = useState(null);
   const [menu, setMenu] = useState(false);
+  const [album, setAlbum] = useState(false);
+  const { isStaff } = useMyRole();
 
   useEffect(() => {
     if (!team?.id) return undefined;
@@ -58,7 +69,16 @@ export default function MessagesScreen() {
         />
       ) : (
         <>
-          <AppHeader team={team} onMenu={() => setMenu(true)} />
+          <AppHeader
+            team={team}
+            onMenu={() => setMenu(true)}
+            right={
+              /* Every photo the team has posted, one tap from where they were
+                 posted. The album is the same collection the thread reads —
+                 see components/PhotoAlbumSheet.jsx. */
+              <HeaderButton label="◫ PHOTOS" onPress={() => setAlbum(true)} />
+            }
+          />
           <SegmentedTabs
             options={[['team', 'Team chat'], ['direct', 'Direct']]}
             value={tab} onChange={setTab}
@@ -66,6 +86,13 @@ export default function MessagesScreen() {
         </>
       )}
       <AccountSheet visible={menu} onClose={() => setMenu(false)} />
+      <PhotoAlbumSheet
+        visible={album}
+        teamId={team.id}
+        user={user}
+        isStaff={isStaff}
+        onClose={() => setAlbum(false)}
+      />
 
       {openDm
         ? <Thread teamId={team.id} user={user} other={openDm} />
@@ -95,6 +122,7 @@ function ChannelThread({ teamId, user, channel }) {
   }), [path, user]);
 
   return <MessageList messages={messages} user={user} onSend={send}
+                      teamId={teamId} channel={channel}
                       placeholder="Message the team" />;
 }
 
@@ -163,13 +191,47 @@ function DirectList({ members, user, onOpen }) {
   );
 }
 
-function MessageList({ messages, user, onSend, placeholder }) {
+/**
+ * @param teamId/channel  present only in a team channel. Polls and photos are
+ *                        a team thing: a poll of one other person is a
+ *                        question, and a DM photo album nobody asked for is a
+ *                        surprise. Their absence is what hides the + button in
+ *                        a direct message.
+ */
+function MessageList({ messages, user, onSend, placeholder, teamId, channel }) {
   // Read from the active team here rather than threaded down through
   // ChannelThread and Thread, neither of which otherwise needs a team colour.
   const bubbles = bubbleColors(useTeamColor());
   const surface = useTeamSurface();
+  const { isStaff } = useMyRole();
   const [draft, setDraft] = useState('');
+  const [attaching, setAttaching] = useState(false);
+  const [composingPoll, setComposingPoll] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const scroller = React.useRef(null);
+  const inChannel = !!teamId && !!channel;
+
+  const sendPoll = useCallback(async (draftPoll) => {
+    await postPoll({ teamId, channel, user, draft: draftPoll });
+  }, [teamId, channel, user]);
+
+  /**
+   * Upload first, then post the message pointing at it. The other order would
+   * put a broken bubble in the thread for however long the upload takes.
+   */
+  const attachPhoto = useCallback(async () => {
+    setAttaching(false);
+    try {
+      const file = await pickPhoto();
+      if (!file) return;
+      setUploading(true);
+      const photo = await uploadPhoto({ teamId, user, file });
+      await postPhotoMessage({ teamId, channel, user, photo });
+    } catch (e) {
+      notify('Could not add photo', e.message);
+    }
+    setUploading(false);
+  }, [teamId, channel, user]);
 
   const submit = async () => {
     const body = draft.trim();
@@ -186,6 +248,30 @@ function MessageList({ messages, user, onSend, placeholder }) {
         {messages.length === 0 && <Text style={styles.empty}>No messages yet.</Text>}
         {messages.map((m) => {
           const mine = m.senderId === user?.uid;
+
+          // A poll draws its own card rather than a bubble: it's a form, and
+          // a form inside a chat bubble that's 80% of the width and tinted the
+          // team colour is unreadable.
+          if (m.kind === 'poll' && inChannel) {
+            return (
+              <PollBubble key={m.id} message={m} teamId={teamId} channel={channel}
+                user={user} canManage={mine || isStaff} />
+            );
+          }
+
+          if (m.kind === 'photo') {
+            return (
+              <View key={m.id} style={[styles.photoWrap, mine && styles.mineAlign]}>
+                {!mine && <Text style={styles.photoSender}>{m.senderName}</Text>}
+                <Image source={{ uri: m.photoUrl }}
+                  style={[styles.photo, {
+                    aspectRatio: m.width && m.height ? m.width / m.height : 4 / 3,
+                  }]}
+                  resizeMode="cover" />
+              </View>
+            );
+          }
+
           // Their messages in the team primary, yours in the secondary. See
           // bubbleColors() for what happens when a team picks two colours too
           // close to tell apart.
@@ -207,15 +293,56 @@ function MessageList({ messages, user, onSend, placeholder }) {
         })}
       </ScrollView>
 
+      {/* The attach menu, above the composer so it doesn't cover the draft
+          someone has already typed. */}
+      {attaching && (
+        <View style={[styles.attachMenu, { backgroundColor: surface }]}>
+          {photoPickingSupported() && (
+            <Pressable onPress={attachPhoto} style={styles.attachItem}>
+              <Text style={styles.attachIcon}>◫</Text>
+              <View style={styles.flex}>
+                <Text style={styles.attachTitle}>Photo</Text>
+                <Text style={styles.attachSub}>Also lands in the team album</Text>
+              </View>
+            </Pressable>
+          )}
+          {isStaff && (
+            <Pressable onPress={() => { setAttaching(false); setComposingPoll(true); }}
+              style={styles.attachItem}>
+              <Text style={styles.attachIcon}>▤</Text>
+              <View style={styles.flex}>
+                <Text style={styles.attachTitle}>Poll</Text>
+                <Text style={styles.attachSub}>Ask the team a question</Text>
+              </View>
+            </Pressable>
+          )}
+        </View>
+      )}
+
       {/* The composer is part of the page, not a card floating on it — a
           fixed white bar under a themed thread read as an unstyled strip. */}
       <View style={[styles.composer, { backgroundColor: surface }]}>
+        {inChannel && (
+          <Pressable onPress={() => setAttaching((a) => !a)} disabled={uploading}
+            style={[styles.plus, attaching && styles.plusOn]}
+            accessibilityRole="button" accessibilityLabel="Add a photo or a poll">
+            {uploading
+              ? <ActivityIndicator color={colors.primary} />
+              : <Text style={[styles.plusText, attaching && styles.plusTextOn]}>+</Text>}
+          </Pressable>
+        )}
         <TextInput value={draft} onChangeText={setDraft} style={[multilineStyle, styles.flex]}
           placeholder={placeholder} placeholderTextColor="#A0A8B8" multiline />
         <Pressable onPress={submit} style={styles.send}>
           <Text style={styles.sendText}>SEND</Text>
         </Pressable>
       </View>
+
+      <PollComposerSheet
+        visible={composingPoll}
+        onClose={() => setComposingPoll(false)}
+        onPost={sendPoll}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -259,6 +386,28 @@ const styles = StyleSheet.create({
     borderTopWidth: 1, borderTopColor: colors.line,
   },
   send: { paddingHorizontal: 16, borderRadius: radius.md, backgroundColor: colors.navy, alignItems: 'center', justifyContent: 'center' },
+  plus: {
+    width: 44, borderRadius: radius.md, borderWidth: 1, borderColor: colors.line,
+    backgroundColor: colors.card, alignItems: 'center', justifyContent: 'center',
+  },
+  plusOn: { backgroundColor: colors.navy, borderColor: colors.navy },
+  plusText: { fontSize: 24, lineHeight: 28, color: colors.pencil },
+  plusTextOn: { color: '#FFF' },
+  attachMenu: {
+    borderTopWidth: 1, borderTopColor: colors.line,
+    paddingHorizontal: spacing.md, paddingTop: spacing.sm,
+  },
+  attachItem: {
+    flexDirection: 'row', alignItems: 'center', gap: spacing.md,
+    backgroundColor: colors.card, borderWidth: 1, borderColor: colors.line,
+    borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm,
+  },
+  attachIcon: { fontSize: 18, color: colors.primary, width: 22, textAlign: 'center' },
+  attachTitle: { ...text.bodyStrong, fontSize: 14, color: colors.navy },
+  attachSub: { ...text.body, fontSize: 11.5, color: colors.pencil, marginTop: 1 },
+  photoWrap: { maxWidth: '76%', alignSelf: 'flex-start', marginBottom: spacing.sm },
+  photoSender: { ...text.label, fontSize: 9.5, color: colors.pencil, marginBottom: 3 },
+  photo: { width: '100%', borderRadius: radius.md, backgroundColor: colors.line },
   sendText: { ...text.buttonSecondary, fontSize: 11, color: '#FFF', letterSpacing: 0.8 },
   msg: { ...text.body, color: colors.pencil, textAlign: 'center' },
 });

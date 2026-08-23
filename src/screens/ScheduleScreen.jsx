@@ -18,9 +18,11 @@ import { db, collection, query, orderBy, onSnapshot } from '../services/firebase
 import { useGameDay } from '../hooks/useGameDay.js';
 import { createEvent, updateEvent, deleteEvent, setRsvp } from '../services/eventService.js';
 import RsvpRow from '../components/RsvpRow.jsx';
+import SignupRow from '../components/SignupRow.jsx';
 import AttendanceSheet, { AttendanceBar } from '../components/AttendanceSheet.jsx';
 import { useRsvps } from '../hooks/useRsvps.js';
 import { useMyRole } from '../hooks/useMyRole.js';
+import { useAuth } from '../hooks/AuthProvider.jsx';
 import { sportForTeam } from '../sports/registry.js';
 import { splitUpcomingPast, groupEventsByDate, dateKey } from '../shared/scheduleFilters.js';
 import MonthCalendar from '../components/MonthCalendar.jsx';
@@ -257,6 +259,9 @@ function GameRow({ game, team, roster, expanded, onToggle, onRemove, onStatus })
 
   // Fans don't see attendance at all, so there's no listener to open for them.
   const { isFan, isStaff } = useMyRole();
+  // Claiming a slot writes who claimed it, so the row needs to know who you
+  // are — the rest of this screen never did.
+  const { user } = useAuth();
   const { counts, attendance } =
     useRsvps(team.id, game.id, roster, { enabled: !isFan });
 
@@ -392,6 +397,11 @@ function GameRow({ game, team, roster, expanded, onToggle, onRemove, onStatus })
               {game.notes ? <Text style={styles.notes}>{game.notes}</Text> : null}
 
               <RsvpRow teamId={team.id} eventId={game.id} roster={roster} />
+
+              {/* Who's bringing what. On the game rather than in chat,
+                  because a rota has to still be findable in week six. */}
+              <SignupRow teamId={team.id} eventId={game.id}
+                         user={user} isStaff={isStaff} />
 
               <View style={[styles.cardBtns, { marginTop: spacing.md }]}>
                 {isGame(game) && game.status === 'scheduled' && (

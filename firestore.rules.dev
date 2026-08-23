@@ -338,6 +338,38 @@ service cloud.firestore {
         allow create: if isStaff(teamId);
         allow delete: if isStaff(teamId);
 
+        /**
+         * Sign-up slots — snacks, drinks, field setup.
+         *
+         * Staff create and remove them; anyone on the team claims one. The
+         * update rule is the interesting half: a member may only touch the
+         * three claim fields, may only ever write THEMSELVES into them, and
+         * may only claim a slot that is currently open. Releasing is the
+         * mirror — your own claim, or a coach clearing anyone's when a family
+         * drops out on the morning.
+         */
+        match /slots/{slotId} {
+          function claimKeys() {
+            return request.resource.data.diff(resource.data).affectedKeys()
+                     .hasOnly(['claimedBy', 'claimedName', 'claimedAt']);
+          }
+          function claimingItself() {
+            return resource.data.claimedBy == null
+                   && request.resource.data.claimedBy == uid();
+          }
+          function releasingOwn() {
+            return request.resource.data.claimedBy == null
+                   && (resource.data.claimedBy == uid() || isStaff(teamId));
+          }
+
+          allow read:   if isMember(teamId);
+          allow create: if isStaff(teamId);
+          allow update: if isStaff(teamId)
+                        || (isMember(teamId) && claimKeys()
+                            && (claimingItself() || releasingOwn()));
+          allow delete: if isStaff(teamId);
+        }
+
         allow update: if
           // Whoever holds the book drives live game state.
           (isMember(teamId) && resource.data.scorekeeperUid == uid())
@@ -408,11 +440,55 @@ service cloud.firestore {
           allow create: if canChat(teamId)
                         && request.resource.data.senderId == uid()
                         && (channelId != 'announcements' || isStaff(teamId));
-          allow update: if resource.data.senderId == uid()
-                        && request.resource.data.diff(resource.data).affectedKeys()
-                             .hasOnly(['text', 'editedAt']);
+          allow update: if (resource.data.senderId == uid()
+                            && request.resource.data.diff(resource.data).affectedKeys()
+                                 .hasOnly(['text', 'editedAt']))
+                        // Closing or reopening a poll. A nested write to
+                        // poll.closed reports as the top-level key 'poll',
+                        // which is as narrow as this can be stated — so it is
+                        // limited to the person who asked the question and the
+                        // coaches, rather than anyone who can see it.
+                        || ((resource.data.senderId == uid() || isStaff(teamId))
+                            && request.resource.data.diff(resource.data).affectedKeys()
+                                 .hasOnly(['poll']));
           allow delete: if resource.data.senderId == uid() || isStaff(teamId);
+
+          /**
+           * Poll answers. One document per voter, id = their uid.
+           *
+           * That id IS the rule: you may write your own vote and nobody
+           * else's, which no array field on the poll could express. Everyone
+           * who can read the channel can read the results — on a team, who
+           * can make Saturday is not a secret, and a coach needs the names
+           * rather than a number.
+           */
+          match /votes/{voterUid} {
+            allow read:   if canChat(teamId);
+            allow create, update: if canChat(teamId) && uid() == voterUid;
+            allow delete: if uid() == voterUid || isStaff(teamId);
+          }
         }
+      }
+
+
+      /**
+       * Team photos.
+       *
+       * One document per photo, whether it was posted in chat or opened from
+       * the album — they are the same collection read two ways, which is what
+       * makes deleting from either place remove it from both.
+       *
+       * Anyone on the team may post one. Only the person who posted it may
+       * take it down, plus staff: a photo of somebody's child is the one thing
+       * a coach has to be able to remove without waiting for whoever posted it
+       * to wake up.
+       */
+      match /photos/{photoId} {
+        allow read:   if isMember(teamId);
+        allow create: if isMember(teamId)
+                      && request.resource.data.uploadedBy == uid();
+        allow update: if resource.data.uploadedBy == uid() || isStaff(teamId);
+        allow delete: if resource.data.uploadedBy == uid() || isStaff(teamId);
       }
 
       // ---- media ---------------------------------------------------------
