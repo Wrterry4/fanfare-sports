@@ -42,6 +42,7 @@ export {
   describePeriod, describeCounters, describePeriodScores,
   describeParticipants, describeSubstitution, describeUpNext,
   describeFeedEntry, describeStatLine, describeStatCard, describeTodayLine, describeMoment,
+  describeAdvancePrompt,
   EMPTY_FEED_TEXT, walkUpSlot,
 } from './present.js';
 

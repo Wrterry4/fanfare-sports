@@ -29,9 +29,21 @@ const ok = (label, cond) => {
 };
 const group = (n) => console.log(`\n${n}`);
 
+/**
+ * Every name the shared screens reach for on a sport pack.
+ *
+ * This list is the contract, and it is only as good as it is complete.
+ * describeAdvancePrompt was added to both packs' present.js and to neither
+ * pack's index.js, so `sport.describeAdvancePrompt` was undefined, the screen's
+ * optional call quietly did nothing, and the feature was invisible with no
+ * error anywhere. A name that isn't listed here isn't tested — so anything the
+ * screen calls goes in this array.
+ */
 const PRESENTER = [
   'describePeriod', 'describeCounters', 'describePeriodScores',
   'describeParticipants', 'describeSubstitution', 'describeUpNext',
+  'describeFeedEntry', 'describeStatLine', 'describeMoment',
+  'describeAdvancePrompt',
 ];
 const NOTIFY = ['isNotifiable', 'describePlay', 'describeGameStart'];
 

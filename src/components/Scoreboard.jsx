@@ -17,7 +17,7 @@
 import React, { memo } from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
-import { colors, text, spacing } from '../theme/tokens.js';
+import { colors, text, spacing, radius } from '../theme/tokens.js';
 
 /** Only drawn when the sport divides a period into halves. */
 function HalfArrow({ direction }) {
@@ -74,14 +74,32 @@ function Scoreboard({ period, counters }) {
 }
 
 const styles = StyleSheet.create({
-  bar: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  /**
+   * Carries its own dark ground rather than inheriting the header's.
+   *
+   * This used to sit on a permanently navy bar, so white pips and grey labels
+   * were safe. The header now takes the team's colour, and on gold, silver or
+   * white the count and outs simply disappeared — the one thing on the screen
+   * a scorekeeper checks between every pitch. A fixed dark pill means the
+   * count reads identically on all twenty-two team colours instead of needing
+   * to be re-tuned for each.
+   */
+  bar: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: 'rgba(11,17,32,0.88)',
+    paddingHorizontal: 10, paddingVertical: 5,
+    borderRadius: radius.md,
+  },
   half: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   inning: { ...text.inning, color: '#FFF', fontSize: 14 },
   pips: { flexDirection: 'row', gap: 9, alignItems: 'center' },
   pipSet: { flexDirection: 'row', gap: 4, alignItems: 'center' },
   pipDots: { flexDirection: 'row', gap: 3, alignItems: 'center' },
-  pipLabel: { ...text.label, fontSize: 9, color: '#7E88A3' },
-  pip: { width: 8, height: 8, borderRadius: 4, borderWidth: 1.5, borderColor: '#5A6486' },
+  // Measured against the pill over the lightest team colour in the palette,
+  // which is the worst case: the label clears 9:1 and an unfilled pip 4.6:1.
+  // The old #7E88A3 and #5A6486 were tuned for navy and vanished on gold.
+  pipLabel: { ...text.label, fontSize: 9, color: '#C7D0E6' },
+  pip: { width: 8, height: 8, borderRadius: 4, borderWidth: 1.5, borderColor: '#8A94B4' },
   pipOn: { backgroundColor: '#FFF', borderColor: '#FFF' },
   pipOut: { backgroundColor: colors.out, borderColor: colors.out },
   right: { alignItems: 'flex-end', gap: 4 },
